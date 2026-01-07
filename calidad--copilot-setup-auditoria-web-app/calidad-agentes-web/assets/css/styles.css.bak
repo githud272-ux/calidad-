@@ -417,48 +417,22 @@ body {
   transform: scale(1.01);
 }
 
-/* Métricas Semanales: mantiene visible la columna de nombres (tipo "congelar paneles") */
-/* Sticky columns for names (first column) and shift (second column) */
-#metricsWeeklyView .data-table th:first-child,
-#metricsWeeklyView .data-table th:nth-child(2) {
-  position: sticky;
-  z-index: 6;
-  background: linear-gradient(135deg, #e8fdf7, #d4f5ea);
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
-}
-
+/* Métricas Semanales: mantiene visible la columna de nombres (tipo “congelar paneles”) */
 #metricsWeeklyView .data-table th:first-child {
-  left: 0;
-}
-
-#metricsWeeklyView .data-table th:nth-child(2) {
-  left: 150px; /* Width of first column */
-}
-
-#metricsWeeklyView .data-table td:first-child,
-#metricsWeeklyView .data-table td:nth-child(2) {
   position: sticky;
-  z-index: 5;
-  background: white;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
+  left: 0;
+  z-index: 6;
 }
 
 #metricsWeeklyView .data-table td:first-child {
+  position: sticky;
   left: 0;
-}
-
-#metricsWeeklyView .data-table td:nth-child(2) {
-  left: 150px; /* Width of first column */
+  z-index: 5;
 }
 
 /* Evita que el hover cree stacking contexts que tapen la columna sticky */
 #metricsWeeklyView .data-table tbody tr:hover td {
   transform: none;
-}
-
-#metricsWeeklyView .data-table tbody tr:hover td:first-child,
-#metricsWeeklyView .data-table tbody tr:hover td:nth-child(2) {
-  background: linear-gradient(135deg, #f8fcff, #eefbf7);
 }
 .empty { text-align: center; color: var(--text-muted); padding: 1rem 0; }
 
@@ -626,71 +600,4 @@ body {
   #connectionHoursContainer {
     max-height: 60vh;
   }
-}
-
-/* Connection Hours View: Sticky columns for names and shift */
-#connectionHoursView .data-table th:first-child,
-#connectionHoursView .data-table th:nth-child(2) {
-  position: sticky;
-  z-index: 6;
-  background: linear-gradient(135deg, #e8fdf7, #d4f5ea);
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
-}
-
-#connectionHoursView .data-table th:first-child {
-  left: 0;
-}
-
-#connectionHoursView .data-table th:nth-child(2) {
-  left: 150px;
-}
-
-#connectionHoursView .data-table td:first-child,
-#connectionHoursView .data-table td:nth-child(2) {
-  position: sticky;
-  z-index: 5;
-  background: white;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
-}
-
-#connectionHoursView .data-table td:first-child {
-  left: 0;
-}
-
-#connectionHoursView .data-table td:nth-child(2) {
-  left: 150px;
-}
-
-#connectionHoursView .data-table tbody tr:hover td {
-  transform: none;
-}
-
-#connectionHoursView .data-table tbody tr:hover td:first-child,
-#connectionHoursView .data-table tbody tr:hover td:nth-child(2) {
-  background: linear-gradient(135deg, #f8fcff, #eefbf7);
-}
-
-/* Monthly Metrics View: Sticky column for names */
-#metricsMonthlyView .data-table th:first-child {
-  position: sticky;
-  left: 0;
-  z-index: 6;
-  background: linear-gradient(135deg, #e8fdf7, #d4f5ea);
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
-}
-
-#metricsMonthlyView .data-table td:first-child {
-  position: sticky;
-  left: 0;
-  z-index: 5;
-  background: white;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
-}
-
-#metricsMonthlyView .data-table tbody tr:hover td {
-  transform: none;
-}
-
-#metricsMonthlyView .data-table tbody tr:hover td:first-child {
-  background: linear-gradient(135deg, #f8fcff, #eefbf7);
 }

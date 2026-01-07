@@ -1,6 +1,7 @@
 {
-  "buildCommand": "cd calidad--copilot-setup-auditoria-web-app/calidad-agentes-web && npm install",
+  "buildCommand": "cd calidad--copilot-setup-auditoria-web-app/calidad-agentes-web && npm install && npm run build",
   "outputDirectory": "calidad--copilot-setup-auditoria-web-app/calidad-agentes-web",
+  "installCommand": "npm install --prefix calidad--copilot-setup-auditoria-web-app/calidad-agentes-web",
   "rewrites": [
     {
       "source": "/(.*)",
@@ -34,7 +35,7 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=86400, must-revalidate"
+          "value": "public, max-age=31536000, immutable"
         }
       ]
     },
@@ -43,7 +44,7 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=300, must-revalidate"
+          "value": "public, max-age=31536000, immutable"
         }
       ]
     },
@@ -52,7 +53,7 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=86400, immutable"
+          "value": "public, max-age=31536000, immutable"
         }
       ]
     }
