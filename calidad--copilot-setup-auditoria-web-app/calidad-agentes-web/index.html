@@ -1,0 +1,1481 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auditorías de Calidad - Ridery 2026</title>
+  <link rel="stylesheet" href="./assets/css/styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/overlayscrollbars@2.4.6/styles/overlayscrollbars.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/overlayscrollbars@2.4.6/browser/overlayscrollbars.browser.es5.min.js"></script>
+</head>
+<body class="bg-grid">
+  
+  <!-- Login/Authentication Screen -->
+  <div id="authScreen" class="overlay">
+    <div class="overlay-card glass">
+      <div style="text-align: center; margin-bottom: 1.5rem;">
+        <div style="width: 80px; height: 80px; margin: 0 auto 1rem; background: linear-gradient(135deg, #38CEA6, #0b8f6a); border-radius: 1rem; display: grid; place-items: center; box-shadow: 0 10px 30px rgba(56, 206, 166, 0.3);">
+          <i class="fas fa-clipboard-check" style="font-size: 2.5rem; color: white;"></i>
+        </div>
+        <h1 style="font-size: 1.75rem; font-weight: 800; color: var(--text-primary); margin-bottom: 0.5rem;">
+          Auditorías de Calidad
+        </h1>
+        <p style="color: var(--text-muted); font-size: 1rem;">
+          Ridery Venezuela
+        </p>
+      </div>
+
+      <div style="background: linear-gradient(135deg, rgba(56, 206, 166, 0.1), rgba(11, 143, 106, 0.05)); border: 1px solid rgba(56, 206, 166, 0.2); border-radius: 0.75rem; padding: 1rem; margin-bottom: 1.5rem;">
+        <p style="color: var(--text-primary); font-size: 0.9rem; line-height: 1.6; margin: 0;">
+          <i class="fas fa-info-circle" style="color: #38CEA6; margin-right: 0.5rem;"></i>
+          <strong>Bienvenido al sistema de gestión de auditorías.</strong><br>
+          Por favor, ingrese su correo electrónico para acceder al sistema.
+        </p>
+      </div>
+
+      <form id="loginForm">
+        <div style="margin-bottom: 1rem;">
+          <label class="label-small" for="emailInput">
+            <i class="fas fa-envelope" style="margin-right: 0.25rem;"></i>
+            Correo Electrónico
+          </label>
+          <input 
+            type="email" 
+            id="emailInput" 
+            class="input-dark" 
+            placeholder="tu-email@ejemplo.com"
+            required
+            autocomplete="email"
+          >
+        </div>
+
+        <button type="submit" class="btn-accent" style="width: 100%; background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; border: none; cursor: pointer; font-size: 1rem;">
+          <i class="fas fa-sign-in-alt" style="margin-right: 0.5rem;"></i>
+          Iniciar Sesión
+        </button>
+      </form>
+
+      <button id="clearSessionBtn" type="button" style="width: 100%; margin-top: 0.75rem; padding: 0.65rem; background: #f3f4f6; color: #6b7280; border: 1px solid #d1d5db; border-radius: 0.5rem; cursor: pointer; font-size: 0.85rem; transition: all 0.2s;">
+        <i class="fas fa-sync-alt" style="margin-right: 0.5rem;"></i>
+        Limpiar Sesión y Datos
+      </button>
+
+      <div class="overlay-hint" style="margin-top: 1.5rem;">
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0;">
+          <strong>Cuentas de prueba:</strong><br>
+          <span style="display: block; margin-top: 0.5rem;">
+            <i class="fas fa-crown" style="color: #eab308;"></i> Admin: <code>admin@ridery.com</code><br>
+            <i class="fas fa-clipboard-check" style="color: #38CEA6;"></i> Calidad: <code>calidad@ridery.com</code><br>
+            <i class="fas fa-user-shield" style="color: #8b5cf6;"></i> Supervisor: <code>supervisor.usuarios@ridery.com</code><br>
+            <i class="fas fa-chart-bar" style="color: #06b6d4;"></i> Analista: <code>analista@ridery.com</code><br>
+            <i class="fas fa-user" style="color: #6b7280;"></i> Usuario: <code>usuario.prueba@ridery.com</code><br>
+          </span>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Application (hidden until authenticated) -->
+  <div id="mainApp" class="hidden">
+    <div class="app-shell">
+      <!-- Sidebar -->
+      <aside class="sidebar glass">
+        <div class="sidebar-header">
+          <div>
+            <div style="width: 48px; height: 48px; background: linear-gradient(135deg, #38CEA6, #0b8f6a); border-radius: 0.75rem; display: grid; place-items: center;">
+              <i class="fas fa-clipboard-check" style="font-size: 1.5rem; color: white;"></i>
+            </div>
+          </div>
+          <div style="flex: 1;">
+            <h2 style="font-size: 1rem; font-weight: 700; margin: 0;">Auditorías</h2>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin: 0;">Ridery Venezuela</p>
+          </div>
+        </div>
+
+        <nav class="nav-group" style="flex: 1;">
+          <span class="nav-title">Navegación</span>
+          <button class="nav-btn active" data-view="dashboard">
+            <i class="fas fa-home"></i>
+            <span>Dashboard</span>
+          </button>
+          <button class="nav-btn" data-view="audits">
+            <i class="fas fa-list"></i>
+            <span>Auditorías</span>
+          </button>
+          <button class="nav-btn" data-view="metrics-weekly">
+            <i class="fas fa-chart-line"></i>
+            <span>Métricas Semanales</span>
+          </button>
+          <button class="nav-btn" data-view="metrics-monthly">
+            <i class="fas fa-chart-bar"></i>
+            <span>Métricas Mensuales</span>
+          </button>
+          <button class="nav-btn" data-view="connection-hours">
+            <i class="fas fa-clock"></i>
+            <span>Horas de Conexión</span>
+          </button>
+          <button class="nav-btn only-editor" data-view="teams">
+            <i class="fas fa-users"></i>
+            <span>Gestión de Equipos</span>
+          </button>
+        </nav>
+
+        <div class="nav-footer">
+          <div style="background: #f9fafb; border-radius: 0.75rem; padding: 0.75rem; margin-bottom: 0.75rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+              <i class="fas fa-user-circle" style="font-size: 1.5rem; color: #38CEA6;"></i>
+              <div style="flex: 1; min-width: 0;">
+                <p style="font-size: 0.85rem; font-weight: 600; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" id="userEmail">usuario@ridery.com</p>
+                <span id="userRoleBadge" class="badge badge-viewer" style="font-size: 0.7rem; padding: 0.25rem 0.5rem;">Lector</span>
+              </div>
+            </div>
+          </div>
+          <button id="logoutBtn" class="nav-btn" style="background: #fee2e2; border-color: rgba(239, 68, 68, 0.2); color: #b91c1c;">
+            <i class="fas fa-sign-out-alt"></i>
+            <span>Cerrar Sesión</span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- Main Content Area -->
+      <main class="main-area">
+        
+        <!-- Dashboard View -->
+        <div id="dashboardView" class="view-section">
+          <div class="hero">
+            <div class="hero-content">
+              <div>
+                <h1 style="font-size: 2rem; font-weight: 800; margin: 0 0 0.5rem 0;">
+                  Auditorías de Calidad
+                </h1>
+                <p style="opacity: 0.95; font-size: 1rem; line-height: 1.6; margin: 0;">
+                  Gestiona y monitorea las auditorías de calidad para los agentes de Ridery Venezuela. 
+                  Mantén un seguimiento preciso de métricas semanales y anuales.
+                </p>
+                <div class="hero-pills">
+                  <span class="pill-glow">
+                    <i class="fas fa-shield-alt"></i> Seguro
+                  </span>
+                  <span class="pill-glow">
+                    <i class="fas fa-chart-line"></i> Métricas en Tiempo Real
+                  </span>
+                  <span class="pill-glow">
+                    <i class="fas fa-users"></i> Multi-Rol
+                  </span>
+                </div>
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                  <button id="dangerClearDataBtn" class="btn-accent" style="background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca;">
+                    <i class="fas fa-exclamation-triangle"></i> Borrar datos (temporal)
+                  </button>
+                </div>
+              </div>
+              <div class="hero-login glass-mini">
+                <h3 style="font-size: 0.9rem; font-weight: 700; margin: 0 0 1rem 0; color: var(--text-primary);">
+                  <i class="fas fa-chart-pie"></i> Resumen Rápido
+                </h3>
+                <div style="display: grid; gap: 0.75rem;">
+                  <div class="stat-card">
+                    <p class="stat-label">Total Auditorías</p>
+                    <p class="stat-value" id="totalAuditsCount">0</p>
+                  </div>
+                  <div class="stat-card">
+                    <p class="stat-label">Esta Semana</p>
+                    <p class="stat-value" id="weeklyAuditsCount">0</p>
+                  </div>
+                  <div class="stat-card">
+                    <p class="stat-label">Agentes Auditados</p>
+                    <p class="stat-value" id="totalAgentsCount">0</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: 1.5rem;">
+            <div class="glass" style="padding: 1.25rem;">
+              <h3 style="font-size: 1.1rem; font-weight: 700; margin: 0 0 0.75rem 0; color: var(--text-primary);">
+                <i class="fas fa-clock" style="color: #38CEA6; margin-right: 0.5rem;"></i>
+                Actividad Reciente
+              </h3>
+              <div id="recentActivity">
+                <p class="empty">No hay actividad reciente</p>
+              </div>
+            </div>
+
+            <div class="glass" style="padding: 1.25rem;">
+              <h3 style="font-size: 1.1rem; font-weight: 700; margin: 0 0 0.75rem 0; color: var(--text-primary);">
+                <i class="fas fa-star" style="color: #38CEA6; margin-right: 0.5rem;"></i>
+                Top Agentes
+              </h3>
+              <div id="topAgents">
+                <p class="empty">No hay datos disponibles</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Team Quality Metrics (Global and Detailed by Team) -->
+          <div class="glass" style="padding: 1.5rem; margin-top: 1.5rem;" id="teamQualityMetrics">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;">
+              <h3 style="font-size: 1.1rem; font-weight: 700; margin: 0; color: var(--text-primary);">
+                <i class="fas fa-chart-pie" style="color: #38CEA6; margin-right: 0.5rem;"></i>
+                Acumulado de Calidad en Gestión
+              </h3>
+              <div style="min-width: 200px;">
+                <select id="teamQualitySelector" class="input-dark">
+                  <option value="">Acumulado Global</option>
+                </select>
+              </div>
+            </div>
+            <div id="teamQualityContent">
+              <p class="empty">Seleccione un equipo o vea el acumulado global</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Audits View -->
+        <div id="auditsView" class="view-section hidden">
+          <div class="glass" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+              <div>
+                <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0 0 0.25rem 0;">
+                  <i class="fas fa-list"></i> Gestión de Auditorías
+                </h2>
+                <p style="color: var(--text-muted); margin: 0;">Crea, edita y visualiza todas las auditorías de calidad</p>
+              </div>
+              <button id="createAuditBtn" class="btn-accent only-editor" style="background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; border: none; cursor: pointer;">
+                <i class="fas fa-plus"></i> Nueva Auditoría
+              </button>
+            </div>
+
+            <div style="display: flex; gap: 0.75rem; margin-bottom: 1.25rem; flex-wrap: wrap;">
+              <input 
+                type="text" 
+                id="searchAudit" 
+                class="input-dark" 
+                placeholder="Buscar por agente, ticket o comentarios..."
+                style="flex: 1; min-width: 250px;"
+              >
+              <select id="filterTeam" class="input-dark only-editor" style="width: auto;">
+                <option value="">Todos los equipos</option>
+              </select>
+              <select id="filterMonth" class="input-dark" style="width: auto;">
+                <option value="">Todos los meses</option>
+                <option value="0">Enero</option>
+                <option value="1">Febrero</option>
+                <option value="2">Marzo</option>
+                <option value="3">Abril</option>
+                <option value="4">Mayo</option>
+                <option value="5">Junio</option>
+                <option value="6">Julio</option>
+                <option value="7">Agosto</option>
+                <option value="8">Septiembre</option>
+                <option value="9">Octubre</option>
+                <option value="10">Noviembre</option>
+                <option value="11">Diciembre</option>
+              </select>
+            </div>
+
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Agente</th>
+                    <th>Equipo</th>
+                    <th>Tipificación</th>
+                    <th>N° Ticket</th>
+                    <th>Fecha Ticket</th>
+                    <th>Fecha Auditoría</th>
+                    <th>Empatía %</th>
+                    <th>Gestión %</th>
+                    <th>Total</th>
+                    <th>Resumen</th>
+                    <th class="only-editor">Visualización</th>
+                    <th class="only-viewer">Observaciones</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="auditsTableBody">
+                  <tr>
+                    <td colspan="12" class="empty">No hay auditorías registradas</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Teams Management View -->
+        <div id="teamsView" class="view-section hidden">
+          <div class="glass" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+            <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0 0 0.5rem 0;">
+              <i class="fas fa-users"></i> Gestión de Equipos
+            </h2>
+            <p style="color: var(--text-muted); margin: 0 0 1.5rem 0;">
+              Administra los integrantes de cada equipo de soporte
+            </p>
+
+            <div id="teamsContainer" style="display: grid; gap: 1.5rem;">
+              <!-- Teams will be loaded here dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Weekly Metrics View -->
+        <div id="metricsWeeklyView" class="view-section hidden">
+          <div class="glass" style="padding: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;">
+              <div>
+                <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0 0 0.5rem 0;">
+                  <i class="fas fa-chart-line"></i> Métricas Semanales
+                </h2>
+                <p style="color: var(--text-muted); margin: 0;">
+                  Rendimiento de auditorías y métricas manuales por semana
+                </p>
+              </div>
+              <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                <div style="min-width: 200px;" class="only-editor">
+                  <label class="label-small" for="filterTeamWeekly">
+                    <i class="fas fa-users"></i> Filtrar por Equipo
+                  </label>
+                  <select id="filterTeamWeekly" class="input-dark" style="width: 100%;">
+                    <option value="">Todos los Equipos</option>
+                  </select>
+                </div>
+                <div style="min-width: 200px;">
+                  <label class="label-small" for="filterMonthMetrics">
+                    <i class="fas fa-calendar-alt"></i> Seleccionar Mes
+                  </label>
+                  <select id="filterMonthMetrics" class="input-dark" style="width: 100%;">
+                    <option value="">Seleccionar mes...</option>
+                    <option value="0">Enero</option>
+                    <option value="1">Febrero</option>
+                    <option value="2">Marzo</option>
+                    <option value="3">Abril</option>
+                    <option value="4">Mayo</option>
+                    <option value="5">Junio</option>
+                    <option value="6">Julio</option>
+                    <option value="7">Agosto</option>
+                    <option value="8">Septiembre</option>
+                    <option value="9">Octubre</option>
+                    <option value="10">Noviembre</option>
+                    <option value="11">Diciembre</option>
+                  </select>
+                </div>
+                <button id="configWeeksBtn" class="btn-accent only-editor" style="background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; border: none; cursor: pointer; margin-top: 1.3rem;">
+                  <i class="fas fa-cog"></i> Configurar Semanas
+                </button>
+                <button id="excelImportBtn" class="btn-accent only-editor" style="background: linear-gradient(135deg, #272883, #1e1f6a); color: white; border: none; cursor: pointer; margin-top: 1.3rem;">
+                  <i class="fas fa-file-excel"></i> Importar datos
+                </button>
+              </div>
+            </div>
+
+            <div id="weeklyMetricsContainer">
+              <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                <i class="fas fa-calendar-week" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+                <p>Seleccione un mes para ver las métricas semanales</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Monthly Metrics View -->
+        <div id="metricsMonthlyView" class="view-section hidden">
+          <div class="glass" style="padding: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+              <div>
+                <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0 0 0.5rem 0;">
+                  <i class="fas fa-chart-bar"></i> Métricas Mensuales
+                </h2>
+                <p style="color: var(--text-muted); margin: 0;">
+                  Análisis completo del mes seleccionado
+                </p>
+              </div>
+              <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                <div style="min-width: 200px;" class="only-editor">
+                  <label class="label-small" for="filterTeamMonthly">
+                    <i class="fas fa-users"></i> Filtrar por Equipo
+                  </label>
+                  <select id="filterTeamMonthly" class="input-dark" style="width: 100%;">
+                    <option value="">Todos los Equipos</option>
+                  </select>
+                </div>
+                <div style="min-width: 200px;">
+                  <label class="label-small" for="filterMonthlyMetrics">
+                    <i class="fas fa-calendar-alt"></i> Seleccionar Mes
+                  </label>
+                  <select id="filterMonthlyMetrics" class="input-dark" style="width: 100%;">
+                    <option value="">Seleccionar mes...</option>
+                    <option value="0">Enero</option>
+                    <option value="1">Febrero</option>
+                    <option value="2">Marzo</option>
+                    <option value="3">Abril</option>
+                    <option value="4">Mayo</option>
+                    <option value="5">Junio</option>
+                    <option value="6">Julio</option>
+                    <option value="7">Agosto</option>
+                    <option value="8">Septiembre</option>
+                    <option value="9">Octubre</option>
+                    <option value="10">Noviembre</option>
+                    <option value="11">Diciembre</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div id="monthlyMetricsContent">
+              <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                <i class="fas fa-chart-bar" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+                <p>Seleccione un mes para ver las métricas mensuales</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Connection Hours View -->
+        <div id="connectionHoursView" class="view-section hidden">
+          <div class="glass" style="padding: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;">
+              <div>
+                <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0 0 0.5rem 0;">
+                  <i class="fas fa-clock"></i> Horas de Conexión
+                </h2>
+                <p style="color: var(--text-muted); margin: 0;">
+                  Seguimiento semanal de horas de conexión online de los agentes
+                </p>
+              </div>
+              <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                <div style="min-width: 200px;" class="only-editor">
+                  <label class="label-small" for="filterTeamConnectionHours">
+                    <i class="fas fa-users"></i> Filtrar por Equipo
+                  </label>
+                  <select id="filterTeamConnectionHours" class="input-dark" style="width: 100%;">
+                    <option value="">Todos los Equipos</option>
+                  </select>
+                </div>
+                <div style="min-width: 200px;">
+                  <label class="label-small" for="filterMonthConnectionHours">
+                    <i class="fas fa-calendar-alt"></i> Seleccionar Mes
+                  </label>
+                  <select id="filterMonthConnectionHours" class="input-dark" style="width: 100%;">
+                    <option value="">Seleccionar mes...</option>
+                    <option value="0">Enero</option>
+                    <option value="1">Febrero</option>
+                    <option value="2">Marzo</option>
+                    <option value="3">Abril</option>
+                    <option value="4">Mayo</option>
+                    <option value="5">Junio</option>
+                    <option value="6">Julio</option>
+                    <option value="7">Agosto</option>
+                    <option value="8">Septiembre</option>
+                    <option value="9">Octubre</option>
+                    <option value="10">Noviembre</option>
+                    <option value="11">Diciembre</option>
+                  </select>
+                </div>
+                <button id="importConnectionHoursBtn" class="btn-accent only-editor" style="background: linear-gradient(135deg, #272883, #1e1f6a); color: white; border: none; cursor: pointer; margin-top: 1.3rem;">
+                  <i class="fas fa-file-import"></i> Importar Horas
+                </button>
+              </div>
+            </div>
+
+            <div id="connectionHoursContainer">
+              <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                <i class="fas fa-clock" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+                <p>Seleccione un mes para ver las horas de conexión</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- Audit Form Modal -->
+  <div id="auditModal" class="overlay hidden">
+    <div class="overlay-card glass" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; position: sticky; top: 0; background: white; z-index: 10; padding-bottom: 1rem; border-bottom: 2px solid #f0f9ff;">
+        <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0;">
+          <i class="fas fa-clipboard-check"></i> <span id="modalTitle">Nueva Auditoría de Chat</span>
+        </h2>
+        <button id="closeModalBtn" class="btn-mini" style="border: none; background: #f3f4f6;">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <form id="auditForm">
+        <input type="hidden" id="auditId">
+        
+        <!-- Basic Information -->
+        <div style="background: #f0f9ff; padding: 1rem; border-radius: 0.75rem; margin-bottom: 1.5rem;">
+          <h3 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: var(--ridery-mint);">
+            <i class="fas fa-info-circle"></i> Información Básica
+          </h3>
+          <div style="display: grid; gap: 1rem;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+              <div>
+                <label class="label-small" for="agentSelect">
+                  <i class="fas fa-user"></i> Agente *
+                </label>
+                <select id="agentSelect" class="input-dark" required>
+                  <option value="">Seleccionar agente...</option>
+                </select>
+              </div>
+              <div>
+                <label class="label-small" for="ticketId">
+                  <i class="fas fa-ticket-alt"></i> ID del Ticket *
+                </label>
+                <input type="text" id="ticketId" class="input-dark" required placeholder="TKT-12345">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+              <div>
+                <label class="label-small" for="ticketDate">
+                  <i class="fas fa-calendar"></i> Fecha del Ticket *
+                </label>
+                <input type="date" id="ticketDate" class="input-dark" required>
+              </div>
+              <div>
+                <label class="label-small" for="auditDate">
+                  <i class="fas fa-calendar-check"></i> Fecha de Auditoría *
+                </label>
+                <input type="date" id="auditDate" class="input-dark" required>
+              </div>
+            </div>
+
+            <div>
+              <label class="label-small" for="tipificacion">
+                <i class="fas fa-tag"></i> Tipificación *
+              </label>
+              <input type="text" id="tipificacion" class="input-dark" required placeholder="Ej: Consulta de servicio">
+            </div>
+          </div>
+        </div>
+
+        <!-- Score Display (calculated automatically) -->
+        <input type="hidden" id="calculatedScore">
+        <input type="hidden" id="empatiaScore">
+        <input type="hidden" id="gestionScore">
+
+        <!-- Pilar Empatía (50%) -->
+        <div style="background: #f0f9ff; padding: 1rem; border-radius: 0.75rem; margin-bottom: 1.5rem; border-left: 4px solid #38CEA6;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; cursor: pointer;" onclick="App.toggleSection('empatiaSection')">
+            <h3 style="font-size: 1rem; font-weight: 700; margin: 0; color: #38CEA6;">
+              <i class="fas fa-heart"></i> Pilar Empatía (50%)
+              <i id="empatiaToggleIcon" class="fas fa-chevron-up" style="margin-left: 0.5rem; font-size: 0.8rem;"></i>
+            </h3>
+            <div style="display: flex; gap: 0.5rem;" onclick="event.stopPropagation()">
+              <button type="button" class="btn-mini" onclick="App.toggleAllCheckboxes('empatia', true)" style="font-size: 0.75rem;">
+                <i class="fas fa-check-double"></i> Marcar todo
+              </button>
+              <button type="button" class="btn-mini" onclick="App.toggleAllCheckboxes('empatia', false)" style="font-size: 0.75rem; background: #fee2e2; color: #b91c1c;">
+                <i class="fas fa-times"></i> Limpiar
+              </button>
+            </div>
+          </div>
+          
+          <div id="empatiaSection">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 1rem; padding: 0.75rem; background: white; border-radius: 0.5rem;">
+              <div>
+                <span id="empatiaPercent" style="font-size: 1.5rem; font-weight: 700; color: #38CEA6;">0%</span>
+                <span style="font-size: 0.85rem; color: var(--text-muted);"> DEL PILAR</span>
+              </div>
+              <div>
+                <span id="empatiaTotalPercent" style="font-size: 1.5rem; font-weight: 700; color: #38CEA6;">0%</span>
+                <span style="font-size: 0.85rem; color: var(--text-muted);"> TOTAL</span>
+              </div>
+            </div>
+
+          <div style="display: grid; gap: 0.5rem;">
+            <!-- MÉTODO RIDED -->
+            <div style="background: white; border-radius: 0.5rem; padding: 0.5rem;">
+              <label style="display: flex; align-items: start; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" name="empatia" id="metodoRided" onchange="App.toggleObservationField('metodoRided'); App.calculateScore()" style="margin-top: 0.25rem;">
+                <div style="flex: 1;">
+                  <strong>MÉTODO RIDED</strong>
+                  <div style="font-size: 0.85rem; color: var(--text-muted);">Bienvenida, Indagación, Solución, Escucha Empática, Despedida.</div>
+                </div>
+                <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('metodoRided')" style="padding: 0.25rem 0.5rem; border: none; background: #f3f4f6; border-radius: 0.25rem; cursor: pointer;">
+                  <i class="fas fa-pencil-alt" style="font-size: 0.85rem;"></i>
+                </button>
+              </label>
+              <div id="obs-metodoRided" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                <textarea class="input-dark" rows="2" placeholder="Observación específica para este criterio..." style="font-size: 0.85rem;"></textarea>
+              </div>
+            </div>
+            
+            <!-- LENGUAJE POSITIVO -->
+            <div style="background: white; border-radius: 0.5rem; padding: 0.5rem;">
+              <label style="display: flex; align-items: start; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" name="empatia" id="lenguajePositivo" onchange="App.toggleObservationField('lenguajePositivo'); App.calculateScore()" style="margin-top: 0.25rem;">
+                <div style="flex: 1;">
+                  <strong>LENGUAJE POSITIVO</strong>
+                  <div style="font-size: 0.85rem; color: var(--text-muted);">Reconocimiento del contexto y estado del cliente. Cortesía.</div>
+                </div>
+                <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('lenguajePositivo')" style="padding: 0.25rem 0.5rem; border: none; background: #f3f4f6; border-radius: 0.25rem; cursor: pointer;">
+                  <i class="fas fa-pencil-alt" style="font-size: 0.85rem;"></i>
+                </button>
+              </label>
+              <div id="obs-lenguajePositivo" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                <textarea class="input-dark" rows="2" placeholder="Observación específica para este criterio..." style="font-size: 0.85rem;"></textarea>
+              </div>
+            </div>
+            
+            <!-- ACOMPAÑAMIENTO -->
+            <div style="background: white; border-radius: 0.5rem; padding: 0.5rem;">
+              <label style="display: flex; align-items: start; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" name="empatia" id="acompanamiento" onchange="App.toggleObservationField('acompanamiento'); App.calculateScore()" style="margin-top: 0.25rem;">
+                <div style="flex: 1;">
+                  <strong>ACOMPAÑAMIENTO</strong>
+                  <div style="font-size: 0.85rem; color: var(--text-muted);">No abandono. Gestión del tiempo de espera.</div>
+                </div>
+                <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('acompanamiento')" style="padding: 0.25rem 0.5rem; border: none; background: #f3f4f6; border-radius: 0.25rem; cursor: pointer;">
+                  <i class="fas fa-pencil-alt" style="font-size: 0.85rem;"></i>
+                </button>
+              </label>
+              <div id="obs-acompanamiento" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                <textarea class="input-dark" rows="2" placeholder="Observación específica para este criterio..." style="font-size: 0.85rem;"></textarea>
+              </div>
+            </div>
+            
+            <!-- PERSONALIZACIÓN -->
+            <div style="background: white; border-radius: 0.5rem; padding: 0.5rem;">
+              <label style="display: flex; align-items: start; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" name="empatia" id="personalizacion" onchange="App.toggleObservationField('personalizacion'); App.calculateScore()" style="margin-top: 0.25rem;">
+                <div style="flex: 1;">
+                  <strong>PERSONALIZACIÓN</strong>
+                  <div style="font-size: 0.85rem; color: var(--text-muted);">Adaptación de plantillas. Evitar repetición.</div>
+                </div>
+                <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('personalizacion')" style="padding: 0.25rem 0.5rem; border: none; background: #f3f4f6; border-radius: 0.25rem; cursor: pointer;">
+                  <i class="fas fa-pencil-alt" style="font-size: 0.85rem;"></i>
+                </button>
+              </label>
+              <div id="obs-personalizacion" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                <textarea class="input-dark" rows="2" placeholder="Observación específica para este criterio..." style="font-size: 0.85rem;"></textarea>
+              </div>
+            </div>
+            
+            <!-- ESTRUCTURA -->
+            <div style="background: white; border-radius: 0.5rem; padding: 0.5rem;">
+              <label style="display: flex; align-items: start; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" name="empatia" id="estructura" onchange="App.toggleObservationField('estructura'); App.calculateScore()" style="margin-top: 0.25rem;">
+                <div style="flex: 1;">
+                  <strong>ESTRUCTURA</strong>
+                  <div style="font-size: 0.85rem; color: var(--text-muted);">Consolidación de mensajes y ritmo de conversación.</div>
+                </div>
+                <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('estructura')" style="padding: 0.25rem 0.5rem; border: none; background: #f3f4f6; border-radius: 0.25rem; cursor: pointer;">
+                  <i class="fas fa-pencil-alt" style="font-size: 0.85rem;"></i>
+                </button>
+              </label>
+              <div id="obs-estructura" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                <textarea class="input-dark" rows="2" placeholder="Observación específica para este criterio..." style="font-size: 0.85rem;"></textarea>
+              </div>
+            </div>
+            
+            <!-- USO DE IA, ORTOGRAFÍA Y EMOJIS -->
+            <div style="background: white; border-radius: 0.5rem; padding: 0.5rem;">
+              <label style="display: flex; align-items: start; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" name="empatia" id="usoIaOrtografia" onchange="App.toggleObservationField('usoIaOrtografia'); App.calculateScore()" style="margin-top: 0.25rem;">
+                <div style="flex: 1;">
+                  <strong>USO DE IA, ORTOGRAFÍA Y EMOJIS</strong>
+                  <div style="font-size: 0.85rem; color: var(--text-muted);">Aplicación de IA, escritura correcta y comunicación visual adecuada.</div>
+                </div>
+                <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('usoIaOrtografia')" style="padding: 0.25rem 0.5rem; border: none; background: #f3f4f6; border-radius: 0.25rem; cursor: pointer;">
+                  <i class="fas fa-pencil-alt" style="font-size: 0.85rem;"></i>
+                </button>
+              </label>
+              <div id="obs-usoIaOrtografia" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                <textarea class="input-dark" rows="2" placeholder="Observación específica para este criterio..." style="font-size: 0.85rem;"></textarea>
+              </div>
+            </div>
+          </div>
+          </div>
+        </div>
+
+        <!-- Pilar Gestión (50%) -->
+        <div style="background: #fef3f2; padding: 1rem; border-radius: 0.75rem; margin-bottom: 1.5rem; border-left: 4px solid #f59e0b;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; cursor: pointer;" onclick="App.toggleSection('gestionSection')">
+            <h3 style="font-size: 1rem; font-weight: 700; margin: 0; color: #f59e0b;">
+              <i class="fas fa-cogs"></i> Pilar Gestión (50%)
+              <i id="gestionToggleIcon" class="fas fa-chevron-up" style="margin-left: 0.5rem; font-size: 0.8rem;"></i>
+            </h3>
+            <div style="display: flex; gap: 0.5rem;" onclick="event.stopPropagation()">
+              <button type="button" class="btn-mini" onclick="App.toggleAllCheckboxes('gestion', true)" style="font-size: 0.75rem;">
+                <i class="fas fa-check-double"></i> Marcar todo
+              </button>
+              <button type="button" class="btn-mini" onclick="App.toggleAllCheckboxes('gestion', false)" style="font-size: 0.75rem; background: #fee2e2; color: #b91c1c;">
+                <i class="fas fa-times"></i> Limpiar
+              </button>
+            </div>
+          </div>
+          
+          <div id="gestionSection">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 1rem; padding: 0.75rem; background: white; border-radius: 0.5rem;">
+              <div>
+                <span id="gestionPercent" style="font-size: 1.5rem; font-weight: 700; color: #f59e0b;">0%</span>
+                <span style="font-size: 0.85rem; color: var(--text-muted);"> DEL PILAR</span>
+              </div>
+              <div>
+                <span id="gestionTotalPercent" style="font-size: 1.5rem; font-weight: 700; color: #f59e0b;">0%</span>
+              <span style="font-size: 0.85rem; color: var(--text-muted);"> TOTAL</span>
+            </div>
+          </div>
+
+          <!-- Gestión de ticket (33%) -->
+          <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <h4 style="font-size: 0.9rem; font-weight: 700; margin: 0; color: var(--text-primary);">
+                Gestión de ticket (33%)
+              </h4>
+              <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.85rem; cursor: pointer;">
+                <input type="checkbox" id="gestionTicketAll" onchange="App.toggleSubcategory('gestionTicket', this.checked)">
+                <span>Marcar</span>
+              </label>
+            </div>
+            <div style="display: grid; gap: 0.5rem; font-size: 0.85rem;">
+              <!-- Estados del Ticket -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="gestionTicket" id="estadosTicket" onchange="App.toggleObservationField('estadosTicket'); App.calculateScore()">
+                  <span style="flex: 1;">Estados del Ticket - Proceso correcto en Zendesk.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('estadosTicket')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-estadosTicket" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Ausencia del Cliente -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="gestionTicket" id="ausenciaCliente" onchange="App.toggleObservationField('ausenciaCliente'); App.calculateScore()">
+                  <span style="flex: 1;">Ausencia del Cliente - Manejo apropiado de no respuesta.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('ausenciaCliente')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-ausenciaCliente" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Validación del Historial -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="gestionTicket" id="validacionHistorial" onchange="App.toggleObservationField('validacionHistorial'); App.calculateScore()">
+                  <span style="flex: 1;">Validación del Historial - Revisión de incidencias previas.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('validacionHistorial')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-validacionHistorial" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Tipificación -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="gestionTicket" id="tipificacionCriterio" onchange="App.toggleObservationField('tipificacionCriterio'); App.calculateScore()">
+                  <span style="flex: 1;">Tipificación - Clasificación correcta del ticket.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('tipificacionCriterio')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-tipificacionCriterio" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Retención de Tickets -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="gestionTicket" id="retencionTickets" onchange="App.toggleObservationField('retencionTickets'); App.calculateScore()">
+                  <span style="flex: 1;">Retención de Tickets - Mantener tickets activos apropiadamente.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('retencionTickets')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-retencionTickets" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Tiempo de Respuesta -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="gestionTicket" id="tiempoRespuesta" onchange="App.toggleObservationField('tiempoRespuesta'); App.calculateScore()">
+                  <span style="flex: 1;">Tiempo de Respuesta - Cumplimiento de tiempos.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('tiempoRespuesta')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-tiempoRespuesta" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Tiempo de Gestión -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="gestionTicket" id="tiempoGestion" onchange="App.toggleObservationField('tiempoGestion'); App.calculateScore()">
+                  <span style="flex: 1;">Tiempo de Gestión - Eficiencia en el manejo.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('tiempoGestion')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-tiempoGestion" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Conocimiento Integral (33%) -->
+          <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <h4 style="font-size: 0.9rem; font-weight: 700; margin: 0; color: var(--text-primary);">
+                Conocimiento Integral de la marca (33%)
+              </h4>
+              <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.85rem; cursor: pointer;">
+                <input type="checkbox" id="conocimientoIntegralAll" onchange="App.toggleSubcategory('conocimientoIntegral', this.checked)">
+                <span>Marcar</span>
+              </label>
+            </div>
+            <div style="display: grid; gap: 0.5rem; font-size: 0.85rem;">
+              <!-- Servicios y Promociones -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="conocimientoIntegral" id="serviciosPromociones" onchange="App.toggleObservationField('serviciosPromociones'); App.calculateScore()">
+                  <span style="flex: 1;">Servicios y Promociones - Conocimiento completo de ofertas.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('serviciosPromociones')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-serviciosPromociones" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Información Veraz -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="conocimientoIntegral" id="informacionVeraz" onchange="App.toggleObservationField('informacionVeraz'); App.calculateScore()">
+                  <span style="flex: 1;">Información Veraz - Datos correctos y verificables.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('informacionVeraz')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-informacionVeraz" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Parlamentos de Contingencia -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="conocimientoIntegral" id="parlamentosContingencia" onchange="App.toggleObservationField('parlamentosContingencia'); App.calculateScore()">
+                  <span style="flex: 1;">Parlamentos de Contingencia - Guiones para situaciones difíciles.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('parlamentosContingencia')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-parlamentosContingencia" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Honestidad y Transparencia -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="conocimientoIntegral" id="honestidadTransparencia" onchange="App.toggleObservationField('honestidadTransparencia'); App.calculateScore()">
+                  <span style="flex: 1;">Honestidad y Transparencia - Comunicación clara y directa.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('honestidadTransparencia')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-honestidadTransparencia" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Uso estratégico de herramientas (33%) -->
+          <div style="background: white; padding: 0.75rem; border-radius: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <h4 style="font-size: 0.9rem; font-weight: 700; margin: 0; color: var(--text-primary);">
+                Uso estratégico de herramientas (33%)
+              </h4>
+              <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.85rem; cursor: pointer;">
+                <input type="checkbox" id="herramientasAll" onchange="App.toggleSubcategory('herramientas', this.checked)">
+                <span>Marcar</span>
+              </label>
+            </div>
+            <div style="display: grid; gap: 0.5rem; font-size: 0.85rem;">
+              <!-- Ridery Office -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="herramientas" id="rideryOffice" onchange="App.toggleObservationField('rideryOffice'); App.calculateScore()">
+                  <span style="flex: 1;">Ridery Office - Dominio de plataforma principal.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('rideryOffice')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-rideryOffice" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Admin y Zendesk -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="herramientas" id="adminZendesk" onchange="App.toggleObservationField('adminZendesk'); App.calculateScore()">
+                  <span style="flex: 1;">Admin y Zendesk - Herramientas administrativas.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('adminZendesk')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-adminZendesk" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Drive y Manuales -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="herramientas" id="driveManuales" onchange="App.toggleObservationField('driveManuales'); App.calculateScore()">
+                  <span style="flex: 1;">Drive y Manuales - Consulta de documentación.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('driveManuales')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-driveManuales" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Slack -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="herramientas" id="slack" onchange="App.toggleObservationField('slack'); App.calculateScore()">
+                  <span style="flex: 1;">Slack - Comunicación interna.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('slack')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-slack" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Generación de Reportes -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="herramientas" id="generacionReportes" onchange="App.toggleObservationField('generacionReportes'); App.calculateScore()">
+                  <span style="flex: 1;">Generación de Reportes - Creación de informes.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('generacionReportes')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-generacionReportes" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+
+              <!-- Carga de Incidencias -->
+              <div style="background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" name="gestion" class="herramientas" id="cargaIncidencias" onchange="App.toggleObservationField('cargaIncidencias'); App.calculateScore()">
+                  <span style="flex: 1;">Carga de Incidencias - Registro apropiado.</span>
+                  <button type="button" class="btn-observation" onclick="event.preventDefault(); App.showObservationField('cargaIncidencias')" style="padding: 0.25rem 0.5rem; border: none; background: #e5e7eb; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-pencil-alt" style="font-size: 0.75rem;"></i>
+                  </button>
+                </label>
+                <div id="obs-cargaIncidencias" class="observation-field" style="display: none; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb;">
+                  <textarea class="input-dark" rows="2" placeholder="Observación específica..." style="font-size: 0.85rem;"></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+          </div>
+        </div>
+
+        <!-- Summary Scores -->
+        <div style="background: #f0fdf4; padding: 1rem; border-radius: 0.75rem; margin-bottom: 1.5rem; border: 2px solid #38CEA6;">
+          <h3 style="font-size: 1rem; font-weight: 700; margin: 0 0 0.75rem 0; color: var(--text-primary);">
+            <i class="fas fa-chart-pie"></i> Resumen de Evaluación
+          </h3>
+          
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem;">
+            <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; text-align: center;">
+              <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.25rem;">Empatía</div>
+              <div id="empatiaFinalPercent" style="font-size: 1.5rem; font-weight: 700; color: #38CEA6;">0%</div>
+            </div>
+            <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; text-align: center;">
+              <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.25rem;">Gestión</div>
+              <div id="gestionFinalPercent" style="font-size: 1.5rem; font-weight: 700; color: #f59e0b;">0%</div>
+            </div>
+            <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; text-align: center; grid-column: 1 / -1;">
+              <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.25rem;">Puntuación Total</div>
+              <div id="totalScoreDisplay" style="font-size: 2rem; font-weight: 700; color: #10b981;">0</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Observations -->
+        <div style="margin-bottom: 1.5rem;">
+          <label class="label-small" for="ticketSummary">
+            <i class="fas fa-file-alt"></i> Resumen del Ticket *
+          </label>
+          <textarea id="ticketSummary" class="input-dark" rows="3" required placeholder="Breve resumen de la interacción y resolución..."></textarea>
+        </div>
+
+        <!-- Action Buttons -->
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="submit" class="btn-accent" style="flex: 1; background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; border: none; cursor: pointer; padding: 1rem;">
+            <i class="fas fa-save"></i> Guardar Auditoría
+          </button>
+          <button type="button" id="cancelModalBtn" class="btn-accent" style="background: #e5e7eb; color: var(--text-primary); border: none; cursor: pointer; padding: 1rem;">
+            <i class="fas fa-times"></i> Cancelar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Audit View Modal (Read Only) -->
+  <div id="auditViewModal" class="overlay hidden">
+    <div class="overlay-card glass" style="max-width: 1000px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; position: sticky; top: 0; background: white; z-index: 10; padding-bottom: 1rem; border-bottom: 2px solid #f0f9ff;">
+        <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0;">
+          <i class="fas fa-eye"></i> Detalle de Auditoría
+        </h2>
+        <button id="closeViewModalBtn" class="btn-mini" style="border: none; background: #f3f4f6;">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <div id="auditViewContent">
+        <!-- Content will be populated dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Week Configuration Modal -->
+  <div id="weekConfigModal" class="overlay hidden">
+    <div class="overlay-card glass" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0;">
+          <i class="fas fa-cog"></i> Configurar Semanas del Mes
+        </h2>
+        <button id="closeWeekConfigBtn" class="btn-mini" style="border: none; background: #f3f4f6;">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <div style="background: #f0f9ff; padding: 1rem; border-radius: 0.75rem; margin-bottom: 1.5rem;">
+        <p style="margin: 0; font-size: 0.9rem; color: var(--text-primary);">
+          <i class="fas fa-info-circle" style="color: #38CEA6;"></i>
+          Configure los rangos de fechas para cada semana del mes seleccionado.
+        </p>
+      </div>
+
+      <div id="weekConfigContent">
+        <!-- Will be populated dynamically -->
+      </div>
+
+      <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
+        <button id="saveWeekConfigBtn" class="btn-accent" style="flex: 1; background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; border: none; cursor: pointer;">
+          <i class="fas fa-save"></i> Guardar Configuración
+        </button>
+        <button id="cancelWeekConfigBtn" class="btn-accent" style="background: #e5e7eb; color: var(--text-primary); border: none; cursor: pointer;">
+          <i class="fas fa-times"></i> Cancelar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual Metrics Entry Modal -->
+  <div id="manualMetricsModal" class="overlay hidden">
+    <div class="overlay-card glass" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0;">
+          <i class="fas fa-edit"></i> Editar Métricas Manuales
+        </h2>
+        <button id="closeManualMetricsBtn" class="btn-mini" style="border: none; background: #f3f4f6;">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <div style="background: #f0f9ff; padding: 1rem; border-radius: 0.75rem; margin-bottom: 1.5rem;">
+        <p style="margin: 0; font-size: 0.9rem; color: var(--text-primary);">
+          <i class="fas fa-info-circle" style="color: #38CEA6;"></i>
+          <strong id="metricsAgentName">Agente</strong> - <span id="metricsWeekRange">Semana</span>
+        </p>
+      </div>
+
+      <form id="manualMetricsForm">
+        <input type="hidden" id="metricsYear">
+        <input type="hidden" id="metricsMonth">
+        <input type="hidden" id="metricsWeekIndex">
+        <input type="hidden" id="metricsAgentKey">
+
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
+          <div>
+            <label class="label-small" for="metricTickets">
+              <i class="fas fa-ticket-alt"></i> Tickets
+            </label>
+            <input type="number" id="metricTickets" class="input-dark" min="0" step="1" value="0">
+          </div>
+          <div>
+            <label class="label-small" for="metricTicketsBad">
+              <i class="fas fa-frown"></i> Tickets con Satisfacción Mala
+            </label>
+            <input type="number" id="metricTicketsBad" class="input-dark" min="0" step="1" value="0">
+          </div>
+          <div>
+            <label class="label-small" for="metricTicketsGood">
+              <i class="fas fa-smile"></i> Tickets con Satisfacción Buena
+            </label>
+            <input type="number" id="metricTicketsGood" class="input-dark" min="0" step="1" value="0">
+          </div>
+          <div>
+            <label class="label-small" for="metricFirstResponse">
+              <i class="fas fa-clock"></i> Tiempo de Primera Respuesta (Seg)
+            </label>
+            <input type="number" id="metricFirstResponse" class="input-dark" min="0" step="0.1" value="0">
+          </div>
+          <div>
+            <label class="label-small" for="metricResolutionTime">
+              <i class="fas fa-hourglass-end"></i> Tiempo de Resolución Completa (Min)
+            </label>
+            <input type="number" id="metricResolutionTime" class="input-dark" min="0" step="0.1" value="0">
+          </div>
+          <div>
+            <label class="label-small" for="metricTicketsPerHour">
+              <i class="fas fa-tachometer-alt"></i> Tickets por Hora
+            </label>
+            <input type="number" id="metricTicketsPerHour" class="input-dark" min="0" step="0.1" value="0" placeholder="Ej: 5.2">
+          </div>
+        </div>
+
+        <div style="background: #f0fdf4; padding: 1rem; border-radius: 0.75rem; margin-bottom: 1.5rem;">
+          <p style="margin: 0; font-size: 0.85rem; color: var(--text-muted);">
+            <i class="fas fa-info-circle" style="color: #38CEA6;"></i>
+            <strong>% Calif</strong> (% Tickets Calificados) se calcula automáticamente: <code>(Calif. Malos + Calif. Buena) / Tickets × 100</code>
+          </p>
+          <p style="margin: 0.5rem 0 0 0; font-size: 0.85rem; color: var(--text-muted);">
+            <i class="fas fa-info-circle" style="color: #f59e0b;"></i>
+            <strong>% Calidad</strong> se calcula automáticamente desde las auditorías registradas.
+          </p>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="submit" class="btn-accent" style="flex: 1; background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; border: none; cursor: pointer;">
+            <i class="fas fa-save"></i> Guardar Métricas
+          </button>
+          <button type="button" id="cancelManualMetricsBtn" class="btn-accent" style="background: #e5e7eb; color: var(--text-primary); border: none; cursor: pointer;">
+            <i class="fas fa-times"></i> Cancelar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Add Team Member Modal -->
+  <div id="addMemberModal" class="overlay hidden">
+    <div class="overlay-card glass" style="max-width: 500px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h2 id="addMemberModalTitle" style="font-size: 1.5rem; font-weight: 800; margin: 0;">
+          <i class="fas fa-user-plus"></i> Agregar Integrante
+        </h2>
+        <button id="closeAddMemberBtn" class="btn-mini" style="border: none; background: #f3f4f6;">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <form id="addMemberForm">
+        <input type="hidden" id="memberTeamId">
+        <input type="hidden" id="memberType" value="member">
+        
+        <div style="margin-bottom: 1rem;">
+          <label class="label-small" for="memberName">
+            <i class="fas fa-user"></i> Nombre Completo *
+          </label>
+          <input type="text" id="memberName" class="input-dark" required placeholder="Ej: Juan Pérez">
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label class="label-small" for="memberEmail">
+            <i class="fas fa-envelope"></i> Email *
+          </label>
+          <input type="email" id="memberEmail" class="input-dark" required placeholder="juan.perez@ridery.com">
+        </div>
+
+        <div id="memberRoleSection" class="only-editor" style="margin-bottom: 1rem;">
+          <label class="label-small" for="memberRole">
+            <i class="fas fa-user-tag"></i> Rol
+          </label>
+          <select id="memberRole" class="input-dark">
+            <option value="viewer">Usuario</option>
+            <option value="supervisor">Supervisor (equipo)</option>
+            <option value="analista">Analista</option>
+          </select>
+        </div>
+
+        <div id="subTeamSection" class="only-editor" style="margin-bottom: 1rem;">
+          <label class="label-small" for="memberSubTeam">
+            <i class="fas fa-sitemap"></i> Sub-equipo (opcional)
+          </label>
+          <input type="text" id="memberSubTeam" class="input-dark" placeholder="Ej: Reembolsos, Pagos, Incidencias...">
+        </div>
+
+        <div id="shiftSection" style="margin-bottom: 1.5rem;">
+          <label class="label-small">
+            <i class="fas fa-clock"></i> Turno *
+          </label>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; margin-top: 0.5rem;">
+            <label class="shift-option">
+              <input type="radio" name="memberShift" value="AM" required>
+              <div class="shift-card">
+                <i class="fas fa-sun"></i>
+                <span>AM - Semana</span>
+                <small>Lunes a Viernes (Mañana)</small>
+              </div>
+            </label>
+            <label class="shift-option">
+              <input type="radio" name="memberShift" value="PM" required>
+              <div class="shift-card">
+                <i class="fas fa-moon"></i>
+                <span>PM - Semana</span>
+                <small>Lunes a Viernes (Tarde)</small>
+              </div>
+            </label>
+            <label class="shift-option">
+              <input type="radio" name="memberShift" value="Madrugada Semana Completa" required>
+              <div class="shift-card">
+                <i class="fas fa-star"></i>
+                <span>Madrugada Semana</span>
+                <small>Lunes a Viernes (Noche)</small>
+              </div>
+            </label>
+            <label class="shift-option">
+              <input type="radio" name="memberShift" value="Madrugada Fin de Semana" required>
+              <div class="shift-card">
+                <i class="fas fa-star-half-alt"></i>
+                <span>Madrugada - Fin de Semana</span>
+                <small>Sábado y Domingo (Noche)</small>
+              </div>
+            </label>
+            <label class="shift-option">
+              <input type="radio" name="memberShift" value="Fin de Semana AM" required>
+              <div class="shift-card">
+                <i class="fas fa-calendar-day"></i>
+                <span>Fin de Semana AM</span>
+                <small>Sábado y Domingo (Mañana)</small>
+              </div>
+            </label>
+            <label class="shift-option">
+              <input type="radio" name="memberShift" value="Fin de Semana PM" required>
+              <div class="shift-card">
+                <i class="fas fa-calendar-alt"></i>
+                <span>Fin de Semana PM</span>
+                <small>Sábado y Domingo (Tarde)</small>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <input type="hidden" id="memberModalMode" value="add">
+        <input type="hidden" id="memberOriginalEmail" value="">
+
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="submit" class="btn-accent" style="flex: 1; background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; border: none; cursor: pointer;">
+            <i class="fas fa-plus"></i> Agregar Integrante
+          </button>
+          <button type="button" id="cancelAddMemberBtn" class="btn-accent" style="background: #e5e7eb; color: var(--text-primary); border: none; cursor: pointer;">
+            <i class="fas fa-times"></i> Cancelar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Excel Import Modal -->
+  <div id="excelImportModal" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); align-items: center; justify-content: center; z-index: 10000;">
+    <div class="modal-card glass" style="max-width: 800px; width: 90%; background: rgba(255, 255, 255, 0.98); border-radius: 1rem; padding: 1.5rem; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);">
+      <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid rgba(56, 206, 166, 0.2);">
+        <h3 style="margin: 0; font-size: 1.25rem; font-weight: 700; color: var(--text-primary);"><i class="fas fa-file-excel"></i> Importar datos</h3>
+        <button onclick="App.closeExcelImportModal()" style="background: none; border: none; font-size: 1.75rem; color: var(--text-muted); cursor: pointer; line-height: 1; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 0.5rem; transition: all 0.2s;" onmouseover="this.style.background='rgba(239, 68, 68, 0.1)'; this.style.color='#ef4444'" onmouseout="this.style.background='none'; this.style.color='var(--text-muted)'">×</button>
+      </div>
+      <div class="modal-body">
+        <div style="background: rgba(39, 40, 131, 0.05); border-left: 4px solid #272883; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+          <p style="margin: 0 0 0.5rem 0; font-weight: 600; color: var(--text-primary);"><i class="fas fa-info-circle"></i> Instrucciones:</p>
+          <ol style="margin: 0; padding-left: 1.5rem; color: var(--text-muted); font-size: 0.9rem;">
+            <li>Seleccione el mes y la semana destino en la vista de métricas semanales.</li>
+            <li>Copie los datos desde Zendesk/Excel (incluya la fila de encabezados).</li>
+            <li>Pegue aquí usando Ctrl+V o Cmd+V.</li>
+            <li>Los nombres con caracteres especiales serán limpiados automáticamente.</li>
+          </ol>
+        </div>
+        <div style="display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 1rem;">
+          <div>
+            <label class="label-small" for="excelSelectedTeam">
+              <i class="fas fa-users"></i> Equipo destino
+            </label>
+            <input id="excelSelectedTeam" class="input-dark" type="text" readonly placeholder="Seleccione un equipo en la vista">
+          </div>
+          <div>
+            <label class="label-small" for="excelSelectedMonth">
+              <i class="fas fa-calendar-alt"></i> Mes seleccionado
+            </label>
+            <input id="excelSelectedMonth" class="input-dark" type="text" readonly placeholder="Seleccione un mes en la vista">
+          </div>
+          <div>
+            <label class="label-small" for="excelImportMode">
+              <i class="fas fa-exchange-alt"></i> Cargar en
+            </label>
+            <select id="excelImportMode" class="input-dark">
+              <option value="semana">Semana específica</option>
+              <option value="rango">Rango de fechas</option>
+            </select>
+          </div>
+          <div>
+            <label class="label-small" for="excelWeekSelect">
+              <i class="fas fa-calendar-week"></i> Semana destino
+            </label>
+            <select id="excelWeekSelect" class="input-dark"></select>
+          </div>
+          <div id="excelRangeWrapper" style="display: none; grid-column: span 2;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.5rem;">
+              <div>
+                <label class="label-small" for="excelRangeStart"><i class="fas fa-calendar-day"></i> Desde</label>
+                <input id="excelRangeStart" type="date" class="input-dark" />
+              </div>
+              <div>
+                <label class="label-small" for="excelRangeEnd"><i class="fas fa-calendar-day"></i> Hasta</label>
+                <input id="excelRangeEnd" type="date" class="input-dark" />
+              </div>
+            </div>
+            <small style="color: var(--text-muted);">Si el rango abarca varios meses, se cargarán todas las semanas que intersecten el rango.</small>
+          </div>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label class="label-small" style="display: block; margin-bottom: 0.5rem;">
+            <i class="fas fa-paste"></i> Pegue aquí los datos de Excel:
+          </label>
+            <textarea id="excelPasteArea" rows="12" placeholder="Pega las columnas separadas por tabulaciones (incluye encabezados)" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem; font-family: 'Courier New', monospace; font-size: 0.85rem; resize: vertical;"></textarea>
+        </div>
+        <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+          <button type="button" onclick="App.closeExcelImportModal()" class="btn-accent" style="background: #e5e7eb; color: var(--text-primary); border: none; cursor: pointer;">
+            <i class="fas fa-times"></i> Cancelar
+          </button>
+          <button type="button" onclick="App.importFromExcel()" class="btn-accent" style="background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; border: none; cursor: pointer;">
+            <i class="fas fa-file-import"></i> Importar datos
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Connection Hours Import Modal -->
+  <div id="connectionHoursImportModal" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); align-items: center; justify-content: center; z-index: 10000;">
+    <div class="modal-card glass" style="max-width: 800px; width: 90%; background: rgba(255, 255, 255, 0.98); border-radius: 1rem; padding: 1.5rem; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);">
+      <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid rgba(56, 206, 166, 0.2);">
+        <h3 style="margin: 0; font-size: 1.25rem; font-weight: 700; color: var(--text-primary);"><i class="fas fa-clock"></i> Importar Horas de Conexión</h3>
+        <button onclick="App.closeConnectionHoursImportModal()" style="background: none; border: none; font-size: 1.75rem; color: var(--text-muted); cursor: pointer; line-height: 1; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 0.5rem; transition: all 0.2s;" onmouseover="this.style.background='rgba(239, 68, 68, 0.1)'; this.style.color='#ef4444'" onmouseout="this.style.background='none'; this.style.color='var(--text-muted)'">×</button>
+      </div>
+      <div class="modal-body">
+        <div style="display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 1rem;">
+          <div>
+            <label class="label-small" for="connectionHoursSelectedTeam">
+              <i class="fas fa-users"></i> Equipo destino
+            </label>
+            <input id="connectionHoursSelectedTeam" class="input-dark" type="text" readonly placeholder="Seleccione un equipo en la vista">
+          </div>
+          <div>
+            <label class="label-small" for="connectionHoursSelectedMonth">
+              <i class="fas fa-calendar-alt"></i> Mes seleccionado
+            </label>
+            <input id="connectionHoursSelectedMonth" class="input-dark" type="text" readonly placeholder="Seleccione un mes en la vista">
+          </div>
+          <div>
+            <label class="label-small" for="connectionHoursWeekSelect">
+              <i class="fas fa-calendar-week"></i> Semana destino
+            </label>
+            <select id="connectionHoursWeekSelect" class="input-dark"></select>
+          </div>
+          <div>
+            <label class="label-small" for="connectionHoursImportMode">
+              <i class="fas fa-exchange-alt"></i> Tipo de carga
+            </label>
+            <select id="connectionHoursImportMode" class="input-dark">
+              <option value="semana">Semana completa</option>
+              <option value="dia">Día específico</option>
+              <option value="rango">Rango de fechas</option>
+            </select>
+          </div>
+          <div id="connectionHoursDayWrapper">
+            <label class="label-small" for="connectionHoursDaySelect">
+              <i class="fas fa-calendar-day"></i> Día específico (según semana)
+            </label>
+            <select id="connectionHoursDaySelect" class="input-dark">
+              <option value="">Seleccione semana para listar días</option>
+            </select>
+          </div>
+          <div id="connectionHoursRangeWrapper" style="display: none; grid-column: span 2;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.5rem;">
+              <div>
+                <label class="label-small" for="connectionHoursRangeStart"><i class="fas fa-calendar-day"></i> Desde</label>
+                <input id="connectionHoursRangeStart" type="date" class="input-dark" />
+              </div>
+              <div>
+                <label class="label-small" for="connectionHoursRangeEnd"><i class="fas fa-calendar-day"></i> Hasta</label>
+                <input id="connectionHoursRangeEnd" type="date" class="input-dark" />
+              </div>
+            </div>
+            <small style="color: var(--text-muted);">Para rango se recomienda pegar el formato con columna de fecha por fila (estado/segundos).</small>
+          </div>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label class="label-small" style="display: block; margin-bottom: 0.5rem;">
+            <i class="fas fa-paste"></i> Pegue aquí los datos:
+          </label>
+          <textarea id="connectionHoursPasteArea" rows="12" placeholder="Pega aquí los datos" style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 0.5rem; font-family: 'Courier New', monospace; font-size: 0.85rem; resize: vertical;"></textarea>
+        </div>
+        <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+          <button type="button" onclick="App.closeConnectionHoursImportModal()" class="btn-accent" style="background: #e5e7eb; color: var(--text-primary); border: none; cursor: pointer;">
+            <i class="fas fa-times"></i> Cancelar
+          </button>
+          <button type="button" onclick="App.importConnectionHours()" class="btn-accent" style="background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; border: none; cursor: pointer;">
+            <i class="fas fa-file-import"></i> Importar Horas
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Observation Modal -->
+  <div id="observationModal" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); align-items: center; justify-content: center; z-index: 10000;">
+    <div class="modal-card glass" style="max-width: 500px; width: 90%; background: rgba(255, 255, 255, 0.95); border-radius: 1rem; padding: 1.5rem; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);">
+      <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid rgba(56, 206, 166, 0.2);">
+        <h3 id="observationTitle" style="margin: 0; font-size: 1.25rem; font-weight: 700; color: var(--text-primary);">💬 Observación</h3>
+        <button onclick="App.closeObservationModal()" style="background: none; border: none; font-size: 1.75rem; color: var(--text-muted); cursor: pointer; line-height: 1; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 0.5rem; transition: all 0.2s;" onmouseover="this.style.background='rgba(239, 68, 68, 0.1)'; this.style.color='#ef4444'" onmouseout="this.style.background='none'; this.style.color='var(--text-muted)'">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="observationContent" style="background: rgba(56, 206, 166, 0.05); border-left: 4px solid #38CEA6; padding: 1rem; border-radius: 0.5rem; color: var(--text-primary); line-height: 1.6; white-space: pre-wrap; font-size: 0.95rem;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./assets/js/data.js"></script>
+  <script src="./assets/js/app.js"></script>
+</body>
+</html>
