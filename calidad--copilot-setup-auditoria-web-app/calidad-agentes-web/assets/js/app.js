@@ -53,7 +53,7 @@ const App = {
     return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   },
 
-  // Set a day status quickly (Libre / Guardia / Clear) from UI
+  // Set a day status quickly (Libre / Guardia / Vacaciones / Clear) from UI
   setConnectionDayStatus(agentName, dateStr, status) {
     const yearFromDate = parseInt(dateStr.split('-')[0], 10);
     const monthIndex = parseInt(dateStr.split('-')[1], 10) - 1;
@@ -80,13 +80,186 @@ const App = {
       return;
     }
 
-    const hours = status === 'guardia' ? 'GUARDIA' : 'Libre';
+    // Get hours label based on status
+    const statusLabels = {
+      'guardia': 'GUARDIA',
+      'libre': 'Libre',
+      'vacaciones': 'VACACIONES'
+    };
+    const hours = statusLabels[status] || status.toUpperCase();
+    const statusDisplayNames = {
+      'guardia': 'GUARDIA',
+      'libre': 'LIBRE',
+      'vacaciones': 'VACACIONES'
+    };
+    
     DataManager.saveAgentDailyHours(agentName, yearFromDate, monthIndex, targetWeekIndex, dateStr, { status, hours });
     const d = this.parseLocalDate(dateStr);
     const dd = String(d.getDate()).padStart(2, '0');
     const mm = String(d.getMonth() + 1).padStart(2, '0');
-    alert(`${status === 'guardia' ? 'GUARDIA' : 'LIBRE'} marcado para ${agentName} en ${dd}/${mm}.`);
+    alert(`${statusDisplayNames[status] || status.toUpperCase()} marcado para ${agentName} en ${dd}/${mm}.`);
     this.loadConnectionHours();
+  },
+
+  // Open the connection status modal for advanced management
+  openConnectionStatusModal(agentName, dateStr) {
+    const modal = document.getElementById('connectionStatusModal');
+    if (!modal) return;
+
+    // Store agent and date in hidden fields
+    document.getElementById('statusModalAgent').value = agentName;
+    document.getElementById('statusModalDate').value = dateStr;
+
+    // Display info
+    const d = this.parseLocalDate(dateStr);
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    document.getElementById('statusModalInfo').textContent = `Agente: ${agentName}`;
+    document.getElementById('statusModalDateDisplay').textContent = `Fecha: ${dd}/${mm}/${yyyy}`;
+
+    // Reset form
+    document.getElementById('statusTypeSelect').value = '';
+    document.getElementById('statusNoteInput').value = '';
+    document.getElementById('extraHoursInput').value = '';
+    document.getElementById('cambioOptions').style.display = 'none';
+    document.getElementById('extraHoursOptions').style.display = 'none';
+
+    // Populate agents for cambio de guardia
+    this.populateCambioAgents(agentName);
+
+    modal.style.display = 'flex';
+  },
+
+  closeConnectionStatusModal() {
+    const modal = document.getElementById('connectionStatusModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  },
+
+  onStatusTypeChange() {
+    const statusType = document.getElementById('statusTypeSelect').value;
+    const cambioOptions = document.getElementById('cambioOptions');
+    const extraHoursOptions = document.getElementById('extraHoursOptions');
+
+    cambioOptions.style.display = statusType === 'cambio' ? 'block' : 'none';
+    extraHoursOptions.style.display = statusType === 'vacante' ? 'block' : 'none';
+  },
+
+  populateCambioAgents(excludeAgent) {
+    const select = document.getElementById('cambioAgentSelect');
+    if (!select) return;
+
+    // Get all agents from teams
+    const teams = DataManager.getAllTeams();
+    const agents = [];
+
+    Object.values(teams).forEach(team => {
+      if (team.agents) {
+        team.agents.forEach(agent => {
+          if (agent.name !== excludeAgent) {
+            agents.push({ name: agent.name, team: team.name });
+          }
+        });
+      }
+    });
+
+    // Sort by name
+    agents.sort((a, b) => a.name.localeCompare(b.name));
+
+    // Populate select
+    select.innerHTML = '<option value="">Seleccionar agente...</option>';
+    agents.forEach(agent => {
+      const option = document.createElement('option');
+      option.value = agent.name;
+      option.textContent = `${agent.name} (${agent.team})`;
+      select.appendChild(option);
+    });
+  },
+
+  saveConnectionStatus() {
+    const agentName = document.getElementById('statusModalAgent').value;
+    const dateStr = document.getElementById('statusModalDate').value;
+    const statusType = document.getElementById('statusTypeSelect').value;
+    const note = document.getElementById('statusNoteInput').value.trim();
+
+    if (!agentName || !dateStr) {
+      alert('Error: No se pudo identificar el agente o la fecha.');
+      return;
+    }
+
+    if (!statusType) {
+      alert('Por favor seleccione un tipo de estado.');
+      return;
+    }
+
+    const yearFromDate = parseInt(dateStr.split('-')[0], 10);
+    const monthIndex = parseInt(dateStr.split('-')[1], 10) - 1;
+    const weeks = DataManager.ensureWeekConfig(yearFromDate, monthIndex);
+    const targetWeekIndex = weeks.findIndex(w => w.startDate <= dateStr && dateStr <= w.endDate);
+
+    if (targetWeekIndex === -1) {
+      alert('La fecha seleccionada no pertenece a una semana configurada.');
+      return;
+    }
+
+    // Handle clear/delete
+    if (statusType === 'clear') {
+      DataManager.clearAgentDailyHours(agentName, yearFromDate, monthIndex, targetWeekIndex, dateStr);
+      this.closeConnectionStatusModal();
+      this.loadConnectionHours();
+      return;
+    }
+
+    // Build day data
+    const dayData = {
+      status: statusType,
+      hours: this.getStatusHoursLabel(statusType),
+      note: note || ''
+    };
+
+    // Handle cambio de guardia
+    if (statusType === 'cambio') {
+      const cambioAgent = document.getElementById('cambioAgentSelect').value;
+      if (!cambioAgent) {
+        alert('Por favor seleccione el agente con quien realizó el cambio.');
+        return;
+      }
+      dayData.cambioWith = cambioAgent;
+      // Also mark the other agent's day as cambio (they received this agent's shift)
+      DataManager.saveAgentDailyHours(cambioAgent, yearFromDate, monthIndex, targetWeekIndex, dateStr, {
+        status: 'cambio_recibido',
+        hours: 'CAMBIO',
+        cambioFrom: agentName,
+        note: `Recibió guardia de ${agentName}`
+      });
+    }
+
+    // Handle horas extra/vacante
+    if (statusType === 'vacante') {
+      const extraHours = parseFloat(document.getElementById('extraHoursInput').value) || 0;
+      dayData.extraHours = extraHours;
+      dayData.hours = 'VACANTE';
+    }
+
+    // Save the day data
+    DataManager.saveAgentDailyHours(agentName, yearFromDate, monthIndex, targetWeekIndex, dateStr, dayData);
+
+    this.closeConnectionStatusModal();
+    this.loadConnectionHours();
+  },
+
+  getStatusHoursLabel(status) {
+    const labels = {
+      'guardia': 'GUARDIA',
+      'libre': 'Libre',
+      'vacaciones': 'VACACIONES',
+      'cambio': 'CAMBIO',
+      'vacante': 'VACANTE',
+      'cambio_recibido': 'CAMBIO'
+    };
+    return labels[status] || status.toUpperCase();
   },
 
   // Observation Modal
@@ -3615,7 +3788,7 @@ const App = {
         <table class="data-table" style="font-size: 0.85rem;">
           <thead>
             <tr>
-              <th rowspan="2" style="vertical-align: middle; min-width: 150px;">Nombre del Agente</th>
+              <th rowspan="2" style="vertical-align: middle; min-width: 150px; position: sticky; left: 0; background: #f8fafc; z-index: 2;">Nombre del Agente</th>
               <th rowspan="2" style="vertical-align: middle; min-width: 100px; background: rgba(56, 206, 166, 0.1);">Turno</th>
     `;
     
@@ -3675,7 +3848,7 @@ const App = {
       const agentShift = this.getAgentShift(agentName, teams);
       const shiftBadge = this.getShiftBadge(agentShift);
       
-      tableHTML += `<tr><td><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
+      tableHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
       
       // Calculate monthly totals
       let monthlyTotals = {
@@ -3937,7 +4110,7 @@ const App = {
           <table class="data-table" style="font-size: 0.85rem; margin: 0;">
             <thead>
               <tr>
-                <th rowspan="2" style="vertical-align: middle; min-width: 150px;">Nombre del Agente</th>
+                <th rowspan="2" style="vertical-align: middle; min-width: 150px; position: sticky; left: 0; background: #f8fafc; z-index: 2;">Nombre del Agente</th>
                 <th rowspan="2" style="vertical-align: middle; min-width: 100px; background: rgba(56, 206, 166, 0.1);">Turno</th>
     `;
     
@@ -3997,7 +4170,7 @@ const App = {
       const agentShift = this.getAgentShift(agentName, teams);
       const shiftBadge = this.getShiftBadge(agentShift);
       
-      tableHTML += `<tr><td><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
+      tableHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
       
       // Calculate monthly totals
       let monthlyTotals = {
@@ -5878,12 +6051,14 @@ const App = {
           return `<option value="${iso}">${label}</option>`;
         }).join('');
         const agentControls = isEditor ? `
-          <div style="margin-top: 4px; font-size: 0.8rem; opacity: 0.8; display: flex; gap: 6px; align-items: center;">
-            <select id="daySel-${weekIndex}-${sanitizedAgent}" class="input-dark" style="font-size: 0.75rem; padding: 2px 4px;">
+          <div style="margin-top: 4px; font-size: 0.8rem; opacity: 0.8; display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+            <select id="daySel-${weekIndex}-${sanitizedAgent}" class="input-dark" style="font-size: 0.75rem; padding: 2px 4px; max-width: 70px;">
               ${dayOptions}
             </select>
-            <span title="Marcar Libre" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'libre')">😴</span>
-            <span title="Marcar Guardia" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'guardia')">🛡️</span>
+            <span title="Libre/Descanso" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'libre')">😴</span>
+            <span title="Guardia" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'guardia')">🛡️</span>
+            <span title="Vacaciones" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'vacaciones')">🏖️</span>
+            <span title="Editar (más opciones)" style="cursor: pointer; background: rgba(39, 40, 131, 0.1); padding: 2px 4px; border-radius: 4px;" onclick="App.openConnectionStatusModal('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value)">✏️</span>
             <span title="Borrar Estado" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'clear')">🗑️</span>
           </div>
         ` : '';

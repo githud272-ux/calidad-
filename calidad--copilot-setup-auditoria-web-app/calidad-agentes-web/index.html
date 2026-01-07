@@ -1532,6 +1532,83 @@
     </div>
   </div>
 
+  <!-- Connection Day Status Modal -->
+  <div id="connectionStatusModal" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); align-items: center; justify-content: center; z-index: 10000;">
+    <div class="modal-card glass" style="max-width: 450px; width: 90%; background: rgba(255, 255, 255, 0.98); border-radius: 1rem; padding: 1.5rem; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);">
+      <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid rgba(39, 40, 131, 0.2);">
+        <h3 id="connectionStatusTitle" style="margin: 0; font-size: 1.25rem; font-weight: 700; color: var(--text-primary);">
+          <i class="fas fa-edit"></i> Gestión de Estado
+        </h3>
+        <button onclick="App.closeConnectionStatusModal()" style="background: none; border: none; font-size: 1.75rem; color: var(--text-muted); cursor: pointer; line-height: 1; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 0.5rem; transition: all 0.2s;" onmouseover="this.style.background='rgba(239, 68, 68, 0.1)'; this.style.color='#ef4444'" onmouseout="this.style.background='none'; this.style.color='var(--text-muted)'">×</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="statusModalAgent">
+        <input type="hidden" id="statusModalDate">
+        
+        <div style="margin-bottom: 1rem;">
+          <p style="margin: 0 0 0.5rem 0; font-weight: 600; color: var(--text-primary);" id="statusModalInfo">Agente: -</p>
+          <p style="margin: 0; font-size: 0.9rem; color: var(--text-muted);" id="statusModalDateDisplay">Fecha: -</p>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label class="label-small" style="display: block; margin-bottom: 0.5rem;">
+            <i class="fas fa-tag"></i> Tipo de Estado
+          </label>
+          <select id="statusTypeSelect" class="input-dark" style="width: 100%;" onchange="App.onStatusTypeChange()">
+            <option value="">Seleccionar estado...</option>
+            <option value="guardia">🛡️ Guardia (Turno Normal)</option>
+            <option value="libre">😴 Libre / Descanso</option>
+            <option value="vacaciones">🏖️ Vacaciones</option>
+            <option value="cambio">🔄 Cambio de Guardia</option>
+            <option value="vacante">⏰ Horas Extra / Vacante (MAB)</option>
+            <option value="clear">🗑️ Borrar Estado</option>
+          </select>
+        </div>
+
+        <!-- Cambio de Guardia Options -->
+        <div id="cambioOptions" style="display: none; margin-bottom: 1rem; padding: 1rem; background: rgba(139, 92, 246, 0.1); border-radius: 0.75rem; border-left: 4px solid #8b5cf6;">
+          <label class="label-small" style="display: block; margin-bottom: 0.5rem; color: #8b5cf6;">
+            <i class="fas fa-exchange-alt"></i> Cambio realizado con:
+          </label>
+          <select id="cambioAgentSelect" class="input-dark" style="width: 100%;">
+            <option value="">Seleccionar agente...</option>
+          </select>
+          <p style="margin: 0.5rem 0 0 0; font-size: 0.8rem; color: var(--text-muted);">
+            Las horas serán transferidas al agente seleccionado.
+          </p>
+        </div>
+
+        <!-- Horas Extra Options -->
+        <div id="extraHoursOptions" style="display: none; margin-bottom: 1rem; padding: 1rem; background: rgba(16, 185, 129, 0.1); border-radius: 0.75rem; border-left: 4px solid #10b981;">
+          <label class="label-small" style="display: block; margin-bottom: 0.5rem; color: #10b981;">
+            <i class="fas fa-clock"></i> Horas Extra a Pagar
+          </label>
+          <input type="number" id="extraHoursInput" class="input-dark" style="width: 100%;" min="0" max="24" step="0.5" placeholder="Cantidad de horas extra">
+          <p style="margin: 0.5rem 0 0 0; font-size: 0.8rem; color: var(--text-muted);">
+            Estas horas se agregarán al renglón "Horas a Pagar".
+          </p>
+        </div>
+
+        <!-- Observación/Nota -->
+        <div style="margin-bottom: 1rem;">
+          <label class="label-small" style="display: block; margin-bottom: 0.5rem;">
+            <i class="fas fa-sticky-note"></i> Observación (opcional)
+          </label>
+          <textarea id="statusNoteInput" class="input-dark" style="width: 100%; min-height: 60px; resize: vertical;" placeholder="Nota o justificación..."></textarea>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #e5e7eb;">
+          <button type="button" onclick="App.closeConnectionStatusModal()" style="padding: 0.75rem 1.5rem; border: 1px solid #e5e7eb; background: white; border-radius: 0.5rem; cursor: pointer; font-weight: 600; color: var(--text-muted);">
+            Cancelar
+          </button>
+          <button type="button" onclick="App.saveConnectionStatus()" style="padding: 0.75rem 1.5rem; border: none; background: linear-gradient(135deg, #272883, #1e1f6a); color: white; border-radius: 0.5rem; cursor: pointer; font-weight: 600;">
+            <i class="fas fa-save"></i> Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="./assets/js/data.js"></script>
   <script src="./assets/js/app.js"></script>
 </body>
