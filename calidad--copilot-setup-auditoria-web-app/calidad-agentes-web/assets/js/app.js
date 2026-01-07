@@ -6274,7 +6274,30 @@ const App = {
         let daysWorked = 0;
         let totalSeconds = 0;
         
-        teamHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong></td>`;
+        // Control buttons for editors
+        const sanitizedAgent = agentName.replace(/[^A-Za-z0-9_-]/g, '');
+        const dayOptions = weekDates.map(date => {
+          const yyyy = date.getFullYear();
+          const mm = String(date.getMonth() + 1).padStart(2, '0');
+          const dd = String(date.getDate()).padStart(2, '0');
+          const iso = `${yyyy}-${mm}-${dd}`;
+          const label = `${dd}/${mm}`;
+          return `<option value="${iso}">${label}</option>`;
+        }).join('');
+        const agentControls = isEditor ? `
+          <div style="margin-top: 4px; font-size: 0.8rem; opacity: 0.8; display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+            <select id="daySelTeam-${weekIndex}-${sanitizedAgent}" class="input-dark" style="font-size: 0.75rem; padding: 2px 4px; max-width: 70px;">
+              ${dayOptions}
+            </select>
+            <span title="Libre/Descanso" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySelTeam-${weekIndex}-${sanitizedAgent}').value, 'libre')">😴</span>
+            <span title="Guardia" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySelTeam-${weekIndex}-${sanitizedAgent}').value, 'guardia')">🛡️</span>
+            <span title="Vacaciones" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySelTeam-${weekIndex}-${sanitizedAgent}').value, 'vacaciones')">🏖️</span>
+            <span title="Editar (más opciones)" style="cursor: pointer; background: rgba(39, 40, 131, 0.1); padding: 2px 4px; border-radius: 4px;" onclick="App.openConnectionStatusModal('${agentName}', document.getElementById('daySelTeam-${weekIndex}-${sanitizedAgent}').value)">✏️</span>
+            <span title="Borrar Estado" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySelTeam-${weekIndex}-${sanitizedAgent}').value, 'clear')">🗑️</span>
+          </div>
+        ` : '';
+        
+        teamHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong>${agentControls}</td>`;
         
         // Add cell for each day
         weekDates.forEach(date => {
