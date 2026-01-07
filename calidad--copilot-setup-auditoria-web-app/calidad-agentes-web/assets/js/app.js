@@ -3447,6 +3447,57 @@ const App = {
     const manualData = DataManager.getWeeklyMetricsData(currentYear, month);
     const weeks = DataManager.getWeekConfig(currentYear, month);
     
+    // Determine which team to show
+    let teamToShow = userTeam; // For non-editors, use their assigned team
+    if (isEditor && selectedTeamFilter) {
+      teamToShow = selectedTeamFilter; // For editors, use selected filter
+    }
+    
+    // If "Todos los Equipos" is selected (no team filter), render each team in its own section
+    if (isEditor && !selectedTeamFilter && !userTeam) {
+      let fullHTML = `
+        <div style="margin-bottom: 1.5rem;">
+          <h3 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem 0; color: var(--text-primary);">
+            <i class="fas fa-calendar-alt"></i> Mes de ${monthName} - Todos los Equipos
+          </h3>
+        </div>
+      `;
+      
+      // Get teams that have members
+      const teamsWithMembers = Object.values(teams).filter(team => 
+        team.members && team.members.some(m => m.role !== 'supervisor' && m.role !== 'analista' && m.role !== 'calidad')
+      );
+      
+      if (teamsWithMembers.length === 0) {
+        container.innerHTML = `
+          <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+            <i class="fas fa-inbox" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+            <p>No hay equipos con integrantes registrados</p>
+          </div>
+        `;
+        return;
+      }
+      
+      // Render each team in its own section
+      teamsWithMembers.forEach(team => {
+        const teamAgentsList = team.members
+          .filter(m => m.role !== 'supervisor' && m.role !== 'analista' && m.role !== 'calidad')
+          .map(m => m.name)
+          .sort((a, b) => {
+            const shiftA = this.getAgentShift(a, teams);
+            const shiftB = this.getAgentShift(b, teams);
+            return this.getShiftPriority(shiftA) - this.getShiftPriority(shiftB);
+          });
+        
+        if (teamAgentsList.length > 0) {
+          fullHTML += this.renderWeeklyMetricsTableForTeam(team.name, team.color, teamAgentsList, weeks, weekMetrics, manualData, monthlyAgentMetrics, teams, isEditor, currentYear, month);
+        }
+      });
+      
+      container.innerHTML = fullHTML;
+      return;
+    }
+    
     // Get all unique agents from audits AND manual data AND team members
     const allAgents = new Set();
     
@@ -3458,12 +3509,6 @@ const App = {
     
     // Add agents from manual metrics
     Object.keys(manualData).forEach(agent => allAgents.add(agent));
-    
-    // Determine which team to show
-    let teamToShow = userTeam; // For non-editors, use their assigned team
-    if (isEditor && selectedTeamFilter) {
-      teamToShow = selectedTeamFilter; // For editors, use selected filter
-    }
     
     // Add all team members based on filter (exclude supervisors and analistas - they are not auditable)
     if (teamToShow) {
@@ -3477,18 +3522,6 @@ const App = {
           }
         });
       }
-    } else if (isEditor && !selectedTeamFilter) {
-      // Editor with no filter - show all teams
-      Object.values(teams).forEach(team => {
-        if (team.members) {
-          team.members.forEach(member => {
-            // Exclude supervisors and analistas from metrics
-            if (member.role !== 'supervisor' && member.role !== 'analista') {
-              allAgents.add(member.name);
-            }
-          });
-        }
-      });
     }
     
     let agentsList = Array.from(allAgents).sort();
@@ -3515,17 +3548,22 @@ const App = {
       container.innerHTML = `
         <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
           <i class="fas fa-inbox" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
-          <p>No hay agentes registrados para ${monthName}</p>
+          <p>No hay agentes registrados para ${monthName}. Por favor seleccione un equipo.</p>
         </div>
       `;
       return;
     }
     
+    // Get team name for header
+    const teamInfo = teamToShow ? teams[teamToShow] : null;
+    const teamName = teamInfo ? teamInfo.name : 'Equipo';
+    const teamColor = teamInfo ? teamInfo.color : '#38CEA6';
+    
     // Build table HTML
     let tableHTML = `
       <div style="margin-bottom: 1.5rem;">
         <h3 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem 0; color: var(--text-primary);">
-          <i class="fas fa-calendar-alt"></i> Mes de ${monthName}
+          <i class="fas fa-calendar-alt"></i> Mes de ${monthName} - ${teamName}
         </h3>
       </div>
       
@@ -3839,6 +3877,194 @@ const App = {
     container.innerHTML = tableHTML;
   },
 
+  // Helper function to render weekly metrics table for a single team
+  renderWeeklyMetricsTableForTeam(teamName, teamColor, agentsList, weeks, weekMetrics, manualData, monthlyAgentMetrics, teams, isEditor, currentYear, month) {
+    if (agentsList.length === 0) return '';
+    
+    let tableHTML = `
+      <div style="margin-bottom: 2rem; border: 2px solid ${teamColor}; border-radius: 0.75rem; overflow: hidden;">
+        <div style="background: ${teamColor}; color: white; padding: 0.75rem 1rem;">
+          <h4 style="margin: 0; font-size: 1rem; font-weight: 700;">
+            <i class="fas fa-users"></i> ${teamName}
+          </h4>
+        </div>
+        
+        <div class="table-scroll">
+          <table class="data-table" style="font-size: 0.85rem; margin: 0;">
+            <thead>
+              <tr>
+                <th rowspan="2" style="vertical-align: middle; min-width: 150px;">Nombre del Agente</th>
+                <th rowspan="2" style="vertical-align: middle; min-width: 100px; background: rgba(56, 206, 166, 0.1);">Turno</th>
+    `;
+    
+    // Add week headers
+    weeks.forEach((week, index) => {
+      tableHTML += `
+        <th colspan="${isEditor ? 10 : 9}" style="background: #f0f9ff; text-align: center; font-size: 0.8rem; padding: 0.5rem;">
+          Semana ${index + 1}: ${week.startDate.split('-')[2]}/${week.startDate.split('-')[1]} al ${week.endDate.split('-')[2]}/${week.endDate.split('-')[1]}
+        </th>
+      `;
+    });
+    
+    // Add accumulated month header
+    tableHTML += `
+      <th colspan="${isEditor ? 10 : 9}" style="background: #f0fdf4; text-align: center; font-weight: 700; font-size: 0.8rem; padding: 0.5rem;">
+        ACUMULADO DEL MES
+      </th>
+    `;
+    
+    tableHTML += `</tr><tr>`;
+    
+    // Add metric subheaders for each week
+    weeks.forEach(() => {
+      tableHTML += `
+        <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">Tickets</th>
+        <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">Tickets x Hora</th>
+        <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">Calif. Malos</th>
+        <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">Calif. Buena</th>
+        <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">T. Resp. (s)</th>
+        <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">T. Resol. (m)</th>
+        <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">T. Resp. (min)</th>
+        <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">% Calif.</th>
+        <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">% Calidad</th>
+        ${isEditor ? '<th style="font-size: 0.7rem; background: #f8fafc;">Acción</th>' : ''}
+      `;
+    });
+    
+    // Add accumulated subheaders
+    tableHTML += `
+      <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">Tickets</th>
+      <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">Tickets x Hora</th>
+      <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">Calif. Malos</th>
+      <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">Calif. Buena</th>
+      <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">T. Resp. (s)</th>
+      <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">T. Resol. (m)</th>
+      <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">T. Resp. (min)</th>
+      <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">% Calif.</th>
+      <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">% Calidad</th>
+      ${isEditor ? '<th style="font-size: 0.7rem; background: #f0fdf4;"></th>' : ''}
+    `;
+    
+    tableHTML += `</tr></thead><tbody>`;
+    
+    // Add rows for each agent
+    agentsList.forEach(agentName => {
+      // Get agent shift
+      const agentShift = this.getAgentShift(agentName, teams);
+      const shiftBadge = this.getShiftBadge(agentShift);
+      
+      tableHTML += `<tr><td><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
+      
+      // Calculate monthly totals
+      let monthlyTotals = {
+        tickets: 0,
+        ticketsBad: 0,
+        ticketsGood: 0,
+        firstResponse: 0,
+        resolutionTime: 0,
+        ticketsPerHour: 0,
+        ticketsPerHourCount: 0,
+        quality: 0,
+        qualityCount: 0,
+        weekCount: 0
+      };
+      
+      // Add cells for each week
+      weeks.forEach((week, weekIndex) => {
+        const weekData = manualData[agentName] && manualData[agentName][weekIndex] ? manualData[agentName][weekIndex] : {};
+        const weekMetric = weekMetrics.find(wm => 
+          wm.week.startDate === week.startDate && wm.week.endDate === week.endDate
+        );
+        const audits = weekMetric && weekMetric.agentMetrics[agentName] ? weekMetric.agentMetrics[agentName] : null;
+        
+        // Get values from manual data
+        const tickets = weekData.tickets || 0;
+        const ticketsPerHour = weekData.ticketsPerHour || 0;
+        const ticketsBad = weekData.ticketsBad || 0;
+        const ticketsGood = weekData.ticketsGood || 0;
+        const firstResponse = weekData.firstResponse || 0;
+        const resolutionTime = weekData.resolutionTime || 0;
+        
+        // Calculate percentages
+        let califPct = 0;
+        if (tickets > 0) {
+          califPct = ((ticketsBad + ticketsGood) / tickets * 100).toFixed(1);
+        }
+        
+        // Get quality from audits
+        let qualityPct = 0;
+        if (audits && audits.tickets > 0) {
+          qualityPct = Math.round(audits.totalScore / audits.tickets);
+        }
+        
+        // Add to monthly totals
+        if (tickets > 0 || firstResponse > 0 || resolutionTime > 0) {
+          monthlyTotals.tickets += tickets;
+          monthlyTotals.ticketsBad += ticketsBad;
+          monthlyTotals.ticketsGood += ticketsGood;
+          monthlyTotals.firstResponse += firstResponse;
+          monthlyTotals.resolutionTime += resolutionTime;
+          monthlyTotals.weekCount++;
+          if (ticketsPerHour > 0) {
+            monthlyTotals.ticketsPerHour += ticketsPerHour;
+            monthlyTotals.ticketsPerHourCount++;
+          }
+        }
+        
+        if (qualityPct > 0) {
+          monthlyTotals.quality += qualityPct;
+          monthlyTotals.qualityCount++;
+        }
+        
+        // Calculate T. Resp. (min) from T. Resp. (s)
+        const firstResponseMin = firstResponse > 0 ? (firstResponse / 60).toFixed(1) : '-';
+        
+        tableHTML += `
+          <td style="text-align: center;">${tickets || '-'}</td>
+          <td style="text-align: center; color: #8b5cf6;">${ticketsPerHour > 0 ? ticketsPerHour.toFixed(1) : '-'}</td>
+          <td style="text-align: center;">${ticketsBad || '-'}</td>
+          <td style="text-align: center;">${ticketsGood || '-'}</td>
+          <td style="text-align: center;">${firstResponse || '-'}</td>
+          <td style="text-align: center;">${resolutionTime || '-'}</td>
+          <td style="text-align: center; color: #0ea5e9;">${firstResponseMin}</td>
+          <td style="text-align: center;">${califPct > 0 ? califPct + '%' : '-'}</td>
+          <td style="text-align: center; color: #38CEA6;">${qualityPct > 0 ? qualityPct + '%' : '-'}</td>
+          ${isEditor ? `<td style="text-align: center;"><button class="btn-mini" onclick="App.openManualMetricsModal('${agentName}', ${weekIndex}, ${currentYear}, ${month})"><i class="fas fa-edit"></i></button></td>` : ''}
+        `;
+      });
+      
+      // Add monthly totals/averages
+      const avgFirstResponse = monthlyTotals.weekCount > 0 ? Math.round(monthlyTotals.firstResponse / monthlyTotals.weekCount) : 0;
+      const avgResolution = monthlyTotals.weekCount > 0 ? Math.round(monthlyTotals.resolutionTime / monthlyTotals.weekCount) : 0;
+      const avgTicketsPerHour = monthlyTotals.ticketsPerHourCount > 0 ? (monthlyTotals.ticketsPerHour / monthlyTotals.ticketsPerHourCount).toFixed(1) : '-';
+      const avgQuality = monthlyTotals.qualityCount > 0 ? Math.round(monthlyTotals.quality / monthlyTotals.qualityCount) : 0;
+      
+      let monthlyCalifPct = 0;
+      if (monthlyTotals.tickets > 0) {
+        monthlyCalifPct = ((monthlyTotals.ticketsBad + monthlyTotals.ticketsGood) / monthlyTotals.tickets * 100).toFixed(1);
+      }
+      
+      const avgFirstResponseMin = avgFirstResponse > 0 ? (avgFirstResponse / 60).toFixed(1) : '-';
+      
+      tableHTML += `
+        <td style="text-align: center; background: #f0fdf4; font-weight: 600;">${monthlyTotals.tickets || '-'}</td>
+        <td style="text-align: center; background: #f0fdf4; color: #8b5cf6; font-weight: 600;">${avgTicketsPerHour}</td>
+        <td style="text-align: center; background: #f0fdf4;">${monthlyTotals.ticketsBad || '-'}</td>
+        <td style="text-align: center; background: #f0fdf4;">${monthlyTotals.ticketsGood || '-'}</td>
+        <td style="text-align: center; background: #f0fdf4;">${avgFirstResponse || '-'}</td>
+        <td style="text-align: center; background: #f0fdf4;">${avgResolution || '-'}</td>
+        <td style="text-align: center; background: #f0fdf4; color: #0ea5e9;">${avgFirstResponseMin}</td>
+        <td style="text-align: center; background: #f0fdf4;">${monthlyCalifPct > 0 ? monthlyCalifPct + '%' : '-'}</td>
+        <td style="text-align: center; background: #f0fdf4; color: #38CEA6; font-weight: 600;">${avgQuality > 0 ? avgQuality + '%' : '-'}</td>
+        ${isEditor ? '<td style="background: #f0fdf4;"></td>' : ''}
+      </tr>`;
+    });
+    
+    tableHTML += `</tbody></table></div></div>`;
+    
+    return tableHTML;
+  },
+
   renderWeeklyChart(metrics, weekData = null) {
     // This function is no longer used with the new weekly metrics view
     // Kept for compatibility
@@ -3894,16 +4120,61 @@ const App = {
     const filterTeamMonthly = document.getElementById('filterTeamMonthly');
     const selectedTeamFilter = filterTeamMonthly ? filterTeamMonthly.value : '';
     
-    // Get all agents with their week data
-    const allAgents = new Set();
-    audits.forEach(audit => allAgents.add(audit.agentName));
-    Object.keys(manualData).forEach(agent => allAgents.add(agent));
-    
     // Determine which team to show
     let teamToShow = userTeam; // For non-editors, use their assigned team
     if (isEditor && selectedTeamFilter) {
       teamToShow = selectedTeamFilter; // For editors, use selected filter
     }
+    
+    // If "Todos los Equipos" is selected (no team filter), render each team in its own section
+    if (isEditor && !selectedTeamFilter && !userTeam) {
+      // Get teams that have members
+      const teamsWithMembers = Object.values(teams).filter(team => 
+        team.members && team.members.some(m => m.role !== 'supervisor' && m.role !== 'analista' && m.role !== 'calidad')
+      );
+      
+      if (teamsWithMembers.length === 0) {
+        container.innerHTML = `
+          <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+            <i class="fas fa-inbox" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+            <p>No hay equipos con integrantes registrados</p>
+          </div>
+        `;
+        return;
+      }
+      
+      let fullHTML = `
+        <div style="margin-bottom: 1.5rem;">
+          <h3 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem 0; color: var(--text-primary);">
+            ${monthName} ${year} - Métricas Mensuales - Todos los Equipos
+          </h3>
+        </div>
+      `;
+      
+      // Render each team in its own section
+      teamsWithMembers.forEach(team => {
+        const teamAgentsList = team.members
+          .filter(m => m.role !== 'supervisor' && m.role !== 'analista' && m.role !== 'calidad')
+          .map(m => m.name)
+          .sort((a, b) => {
+            const shiftA = this.getAgentShift(a, teams);
+            const shiftB = this.getAgentShift(b, teams);
+            return this.getShiftPriority(shiftA) - this.getShiftPriority(shiftB);
+          });
+        
+        if (teamAgentsList.length > 0) {
+          fullHTML += this.renderMonthlyMetricsTableForTeam(team.name, team.color, teamAgentsList, audits, weeks, manualData, teams, year, month);
+        }
+      });
+      
+      container.innerHTML = fullHTML;
+      return;
+    }
+    
+    // Get all agents with their week data
+    const allAgents = new Set();
+    audits.forEach(audit => allAgents.add(audit.agentName));
+    Object.keys(manualData).forEach(agent => allAgents.add(agent));
     
     // Add team members based on filter (exclude supervisors and analistas - they are not auditable)
     if (teamToShow) {
@@ -3916,18 +4187,6 @@ const App = {
           }
         });
       }
-    } else if (isEditor && !selectedTeamFilter) {
-      // Editor with no filter - show all teams
-      Object.values(teams).forEach(team => {
-        if (team.members) {
-          team.members.forEach(member => {
-            // Exclude supervisors and analistas from metrics
-            if (member.role !== 'supervisor' && member.role !== 'analista') {
-              allAgents.add(member.name);
-            }
-          });
-        }
-      });
     }
     
     let agentsList = Array.from(allAgents).sort();
@@ -3949,10 +4208,14 @@ const App = {
       return this.getShiftPriority(shiftA) - this.getShiftPriority(shiftB);
     });
     
+    // Get team name for header
+    const teamInfo = teamToShow ? teams[teamToShow] : null;
+    const teamName = teamInfo ? teamInfo.name : 'Equipo';
+    
     let content = `
       <div style="margin-bottom: 1.5rem;">
         <h3 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem 0; color: var(--text-primary);">
-          ${monthName} ${year} - Métricas Mensuales
+          ${monthName} ${year} - Métricas Mensuales - ${teamName}
         </h3>
       </div>
       
@@ -4143,6 +4406,133 @@ const App = {
     `;
     
     container.innerHTML = content;
+  },
+
+  // Helper function to render monthly metrics table for a single team
+  renderMonthlyMetricsTableForTeam(teamName, teamColor, agentsList, audits, weeks, manualData, teams, year, month) {
+    if (agentsList.length === 0) return '';
+    
+    let tableHTML = `
+      <div style="margin-bottom: 2rem; border: 2px solid ${teamColor}; border-radius: 0.75rem; overflow: hidden;">
+        <div style="background: ${teamColor}; color: white; padding: 0.75rem 1rem;">
+          <h4 style="margin: 0; font-size: 1rem; font-weight: 700;">
+            <i class="fas fa-users"></i> ${teamName}
+          </h4>
+        </div>
+        
+        <div class="table-scroll">
+          <table class="data-table" style="font-size: 0.85rem; margin: 0;">
+            <thead>
+              <tr>
+                <th style="min-width: 140px;">Nombre del Agente</th>
+                <th style="min-width: 100px; background: rgba(56, 206, 166, 0.1);">Turno</th>
+                <th>Tickets</th>
+                <th>Tickets x Hora</th>
+                <th>Calif. Malos</th>
+                <th>Calif. Buena</th>
+                <th>T. Resp. (s)</th>
+                <th>T. Resol. (m)</th>
+                <th>% Calif.</th>
+                <th>% Calidad</th>
+                <th>% Calif. Positivos</th>
+                <th>% Satisfacción</th>
+              </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    // Process each agent
+    agentsList.forEach(agentName => {
+      const agentShift = this.getAgentShift(agentName, teams);
+      const shiftBadge = this.getShiftBadge(agentShift);
+      
+      // Accumulate data for this agent across all weeks
+      let totalTickets = 0;
+      let totalTicketsBad = 0;
+      let totalTicketsGood = 0;
+      let totalFirstResponse = 0;
+      let totalResolutionTime = 0;
+      let totalTicketsPerHour = 0;
+      let ticketsPerHourCount = 0;
+      let qualitySum = 0;
+      let qualityCount = 0;
+      let weekCount = 0;
+      
+      weeks.forEach((week, weekIndex) => {
+        const manual = manualData[agentName] && manualData[agentName][weekIndex] ? manualData[agentName][weekIndex] : {};
+        
+        // Get quality from audits for this week
+        const weekAudits = audits.filter(audit => {
+          return audit.agentName === agentName && audit.date >= week.startDate && audit.date <= week.endDate;
+        });
+        
+        // Accumulate manual metrics
+        if (manual.tickets || weekAudits.length > 0) {
+          totalTickets += manual.tickets || 0;
+          totalTicketsBad += manual.ticketsBad || 0;
+          totalTicketsGood += manual.ticketsGood || 0;
+          totalFirstResponse += manual.firstResponse || 0;
+          totalResolutionTime += manual.resolutionTime || 0;
+          
+          if (manual.ticketsPerHour) {
+            totalTicketsPerHour += manual.ticketsPerHour;
+            ticketsPerHourCount++;
+          }
+          
+          weekCount++;
+        }
+        
+        // Accumulate quality scores
+        if (weekAudits.length > 0) {
+          const totalScore = weekAudits.reduce((sum, a) => sum + parseFloat(a.score || 0), 0);
+          qualitySum += totalScore / weekAudits.length;
+          qualityCount++;
+        }
+      });
+      
+      // Calculate averages and percentages
+      const avgFirstResponse = weekCount > 0 ? Math.round(totalFirstResponse / weekCount) : 0;
+      const avgResolutionTime = weekCount > 0 ? Math.round(totalResolutionTime / weekCount) : 0;
+      const avgQuality = qualityCount > 0 ? Math.round(qualitySum / qualityCount) : 0;
+      const avgTicketsPerHour = ticketsPerHourCount > 0 ? (totalTicketsPerHour / ticketsPerHourCount).toFixed(1) : '-';
+      
+      let percentCalif = 0;
+      if (totalTickets > 0) {
+        percentCalif = ((totalTicketsBad + totalTicketsGood) / totalTickets * 100).toFixed(1);
+      }
+      
+      let percentCalifPositivos = 0;
+      const totalRated = totalTicketsBad + totalTicketsGood;
+      if (totalRated > 0) {
+        percentCalifPositivos = (totalTicketsGood / totalRated * 100).toFixed(1);
+      }
+      
+      let percentSatisfaction = 0;
+      if (totalTickets > 0) {
+        percentSatisfaction = (totalTicketsGood / totalTickets * 100).toFixed(1);
+      }
+      
+      tableHTML += `
+        <tr>
+          <td><strong>${agentName}</strong></td>
+          <td>${shiftBadge}</td>
+          <td style="text-align: center;">${totalTickets || '-'}</td>
+          <td style="text-align: center; color: #8b5cf6;">${avgTicketsPerHour}</td>
+          <td style="text-align: center;">${totalTicketsBad || '-'}</td>
+          <td style="text-align: center;">${totalTicketsGood || '-'}</td>
+          <td style="text-align: center;">${avgFirstResponse || '-'}</td>
+          <td style="text-align: center;">${avgResolutionTime || '-'}</td>
+          <td style="text-align: center;">${percentCalif > 0 ? percentCalif + '%' : '-'}</td>
+          <td style="text-align: center; color: #38CEA6; font-weight: 600;">${avgQuality > 0 ? avgQuality + '%' : '-'}</td>
+          <td style="text-align: center; color: #10b981;">${percentCalifPositivos > 0 ? percentCalifPositivos + '%' : '-'}</td>
+          <td style="text-align: center; color: #0ea5e9;">${percentSatisfaction > 0 ? percentSatisfaction + '%' : '-'}</td>
+        </tr>
+      `;
+    });
+    
+    tableHTML += `</tbody></table></div></div>`;
+    
+    return tableHTML;
   },
 
   renderMonthlyChart(weeks, audits) {
@@ -5256,6 +5646,56 @@ const App = {
       teamToShow = selectedTeamFilter;
     }
 
+    // If "Todos los Equipos" is selected (no team filter), render each team in its own section
+    if (isEditor && !selectedTeamFilter && !userTeam) {
+      const container = document.getElementById('connectionHoursContainer');
+      
+      // Get teams that have members
+      const teamsWithMembers = Object.values(teams).filter(team => 
+        team.members && team.members.some(m => m.role !== 'supervisor' && m.role !== 'analista' && m.role !== 'calidad')
+      );
+      
+      if (teamsWithMembers.length === 0) {
+        container.innerHTML = `
+          <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+            <i class="fas fa-inbox" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+            <p>No hay equipos con integrantes registrados</p>
+          </div>
+        `;
+        return;
+      }
+      
+      let fullHTML = `
+        <div style="margin-bottom: 1.5rem;">
+          <h3 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem 0; color: var(--text-primary);">
+            <i class="fas fa-clock"></i> Horas de Conexión - ${monthName} ${currentYear} - Todos los Equipos
+          </h3>
+          <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0;">
+            <strong>Regla:</strong> Turno normal = 8h/día, Madrugada = 6h/día
+          </p>
+        </div>
+      `;
+      
+      // Render each team in its own section
+      teamsWithMembers.forEach(team => {
+        const teamAgentsList = team.members
+          .filter(m => m.role !== 'supervisor' && m.role !== 'analista' && m.role !== 'calidad')
+          .map(m => m.name)
+          .sort((a, b) => {
+            const shiftA = this.getAgentShift(a, teams);
+            const shiftB = this.getAgentShift(b, teams);
+            return this.getShiftPriority(shiftA) - this.getShiftPriority(shiftB);
+          });
+        
+        if (teamAgentsList.length > 0) {
+          fullHTML += this.renderConnectionHoursTableForTeam(team.name, team.color, teamAgentsList, weeks, connectionData, teams, currentYear, month, isEditor);
+        }
+      });
+      
+      container.innerHTML = fullHTML;
+      return;
+    }
+
     // Get agents list
     const allAgents = new Set();
     
@@ -5269,17 +5709,6 @@ const App = {
           }
         });
       }
-    } else if (isEditor && !selectedTeamFilter) {
-      // Editor with no filter - show all teams
-      Object.values(teams).forEach(team => {
-        if (team.members) {
-          team.members.forEach(member => {
-            if (member.role !== 'supervisor' && member.role !== 'analista') {
-              allAgents.add(member.name);
-            }
-          });
-        }
-      });
     }
 
     // Also add agents that have data but might not be in team members list
@@ -5530,6 +5959,192 @@ const App = {
       </div>
       ${fullHTML}
     `;
+  },
+
+  // Helper function to render connection hours table for a single team
+  renderConnectionHoursTableForTeam(teamName, teamColor, agentsList, weeks, connectionData, teams, year, month, isEditor) {
+    if (agentsList.length === 0) return '';
+    
+    const shortDayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    
+    // Helper to format seconds to H:MM:SS
+    const formatTimeHMS = (seconds) => {
+      if (!seconds || seconds <= 0) return '-';
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+      return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    };
+
+    // Helper to get dates for a week
+    const getWeekDates = (startDate, endDate) => {
+      const dates = [];
+      const start = this.parseLocalDate(startDate);
+      const end = this.parseLocalDate(endDate);
+      const current = new Date(start);
+      
+      while (current <= end) {
+        dates.push(new Date(current));
+        current.setDate(current.getDate() + 1);
+      }
+      return dates;
+    };
+    
+    let teamHTML = `
+      <div style="margin-bottom: 2rem; border: 2px solid ${teamColor}; border-radius: 0.75rem; overflow: hidden;">
+        <div style="background: ${teamColor}; color: white; padding: 0.75rem 1rem;">
+          <h4 style="margin: 0; font-size: 1rem; font-weight: 700;">
+            <i class="fas fa-users"></i> ${teamName}
+          </h4>
+        </div>
+    `;
+    
+    // Build HTML for each week
+    weeks.forEach((week, weekIndex) => {
+      const weekDates = getWeekDates(week.startDate, week.endDate);
+      const startDay = week.startDate.split('-')[2];
+      const startMonth = week.startDate.split('-')[1];
+      const endDay = week.endDate.split('-')[2];
+      const endMonth = week.endDate.split('-')[1];
+      
+      teamHTML += `
+        <div style="margin: 1rem; border: 1px solid #e5e7eb; border-radius: 0.75rem; overflow: hidden;">
+          <div style="background: linear-gradient(135deg, #272883, #1e1f6a); color: white; padding: 0.5rem 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+            <h5 style="margin: 0; font-size: 0.9rem; font-weight: 600;">
+              <i class="fas fa-calendar-week"></i> Semana ${startDay}/${startMonth} al ${endDay}/${endMonth}
+            </h5>
+          </div>
+          
+          <div class="table-scroll">
+            <table class="data-table" style="font-size: 0.85rem; margin: 0;">
+              <thead>
+                <tr style="background: #f8fafc;">
+                  <th style="min-width: 150px; position: sticky; left: 0; background: #f8fafc; z-index: 1;">Nombre del Agente</th>
+      `;
+      
+      // Add day headers with dates
+      weekDates.forEach(date => {
+        const dayName = shortDayNames[date.getDay()];
+        const dayNum = String(date.getDate()).padStart(2, '0');
+        const monthNum = String(date.getMonth() + 1).padStart(2, '0');
+        teamHTML += `<th style="text-align: center; min-width: 80px;">${dayName}<br><small style="font-weight: 400; color: var(--text-muted);">${dayNum}/${monthNum}</small></th>`;
+      });
+      
+      // Add summary headers
+      teamHTML += `
+                  <th style="text-align: center; background: rgba(56, 206, 166, 0.1); min-width: 60px;">Días Trabajados</th>
+                  <th style="text-align: center; background: rgba(56, 206, 166, 0.1); min-width: 90px;">Horas Proyectadas</th>
+                  <th style="text-align: center; background: rgba(56, 206, 166, 0.1); min-width: 90px;">Horas Realizadas</th>
+                  <th style="text-align: center; background: rgba(239, 68, 68, 0.1); min-width: 80px;">Horas Pendientes</th>
+                  <th style="text-align: center; background: rgba(16, 185, 129, 0.1); min-width: 80px;">Horas a Favor</th>
+                </tr>
+              </thead>
+              <tbody>
+      `;
+      
+      // Add rows for each agent
+      agentsList.forEach(agentName => {
+        const agentShift = this.getAgentShift(agentName, teams);
+        const expectedDailyHours = DataManager.getExpectedDailyHours(agentShift);
+        const expectedDailySeconds = expectedDailyHours * 3600;
+        
+        const weekData = connectionData[agentName] && connectionData[agentName][weekIndex];
+        const daysData = weekData && weekData.days ? weekData.days : {};
+        
+        let daysWorked = 0;
+        let totalSeconds = 0;
+        
+        teamHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong></td>`;
+        
+        // Add cell for each day
+        weekDates.forEach(date => {
+          const yyyy = date.getFullYear();
+          const mm = String(date.getMonth() + 1).padStart(2, '0');
+          const dd = String(date.getDate()).padStart(2, '0');
+          const dateStr = `${yyyy}-${mm}-${dd}`;
+          const dayData = daysData[dateStr];
+          
+          let cellContent = '';
+          let cellStyle = 'text-align: center;';
+          const isWeekendShift = ['Fin de Semana AM', 'Fin de Semana PM', 'Madrugada Fin de Semana'].includes(agentShift);
+          const dow = date.getDay();
+          
+          if (dayData) {
+            const status = dayData.status || 'worked';
+            const hours = dayData.hours || '';
+            
+            if (status === 'libre' || hours === 'Libre') {
+              cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
+            } else if (status === 'vacaciones' || hours === 'VACACIONES') {
+              cellContent = '<span style="color: #f59e0b; font-weight: 600;">VACACIONES</span>';
+              cellStyle += ' background: rgba(245, 158, 11, 0.1);';
+            } else if (status === 'cambio' || hours === 'CAMBIO') {
+              cellContent = '<span style="color: #8b5cf6; font-weight: 600;">CAMBIO</span>';
+              cellStyle += ' background: rgba(139, 92, 246, 0.1);';
+            } else if (status === 'guardia' || hours === 'GUARDIA') {
+              cellContent = '<span style="color: #06b6d4; font-weight: 600;">GUARDIA</span>';
+              cellStyle += ' background: rgba(6, 182, 212, 0.1);';
+            } else if (hours) {
+              const seconds = DataManager.parseTimeToSeconds(hours);
+              if (seconds > 0) {
+                daysWorked++;
+                totalSeconds += seconds;
+                
+                if (seconds >= expectedDailySeconds) {
+                  cellStyle += ' color: #10b981; font-weight: 600;';
+                } else if (seconds >= expectedDailySeconds * 0.9) {
+                  cellStyle += ' color: #f59e0b;';
+                } else {
+                  cellStyle += ' color: #ef4444;';
+                }
+              }
+              cellContent = hours;
+            }
+          } else {
+            if (isWeekendShift && dow >= 1 && dow <= 5) {
+              cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
+            } else {
+              cellContent = '<span style="color: #d1d5db;">-</span>';
+            }
+          }
+          
+          teamHTML += `<td style="${cellStyle}">${cellContent}</td>`;
+        });
+        
+        // Calculate expected hours based on days worked
+        const expectedSeconds = daysWorked * expectedDailySeconds;
+        const expectedFormatted = formatTimeHMS(expectedSeconds);
+        const actualFormatted = formatTimeHMS(totalSeconds);
+        
+        // Calculate pending and extra hours
+        const diff = totalSeconds - expectedSeconds;
+        let pendingFormatted = '-';
+        let extraFormatted = '-';
+        
+        if (diff < 0) {
+          pendingFormatted = `<span style="color: #ef4444; font-weight: 600;">${formatTimeHMS(Math.abs(diff))}</span>`;
+        } else if (diff > 0) {
+          extraFormatted = `<span style="color: #10b981; font-weight: 600;">${formatTimeHMS(diff)}</span>`;
+        } else if (daysWorked > 0) {
+          pendingFormatted = '0:00:00';
+          extraFormatted = '0:00:00';
+        }
+        
+        teamHTML += `
+          <td style="text-align: center; background: rgba(56, 206, 166, 0.05); font-weight: 600;">${daysWorked}</td>
+          <td style="text-align: center; background: rgba(56, 206, 166, 0.05);">${expectedFormatted}</td>
+          <td style="text-align: center; background: rgba(56, 206, 166, 0.05); font-weight: 600;">${actualFormatted}</td>
+          <td style="text-align: center; background: rgba(239, 68, 68, 0.05);">${pendingFormatted}</td>
+          <td style="text-align: center; background: rgba(16, 185, 129, 0.05);">${extraFormatted}</td>
+        </tr>`;
+      });
+      
+      teamHTML += `</tbody></table></div></div>`;
+    });
+    
+    teamHTML += `</div>`;
+    
+    return teamHTML;
   },
 
   showAgentEvidence(agentName, year, month, weekIndex) {
