@@ -1567,6 +1567,94 @@ const DataManager = {
     const incidents = this.getAllIncidents();
     const types = [...new Set(incidents.map(i => i.type).filter(Boolean))];
     return types.sort();
+  },
+
+  // Calculate satisfaction excluding incident days (Scenario B)
+  // Returns: { scenarioA: {...}, scenarioB: {...}, deviation: number }
+  calculateAgentSatisfactionWithIncidents(agentName, year, month, teamId) {
+    const weeklyData = this.getWeeklyMetricsData(year, month);
+    const weekConfig = this.getWeekConfig(year, month);
+    
+    if (!weeklyData[agentName]) {
+      return {
+        scenarioA: { pct: null, totalTickets: 0, totalGood: 0 },
+        scenarioB: { pct: null, totalTickets: 0, totalGood: 0 },
+        deviation: 0,
+        hasIncidents: false
+      };
+    }
+    
+    let scenarioA = { totalTickets: 0, totalGood: 0 };
+    let scenarioB = { totalTickets: 0, totalGood: 0 };
+    let hasIncidents = false;
+    
+    // Build a map of dates that have incidents for this team
+    const incidentDates = new Set();
+    if (teamId) {
+      const incidents = this.getAllIncidents();
+      incidents.forEach(incident => {
+        if (incident.teams.includes(teamId)) {
+          incidentDates.add(incident.date);
+          hasIncidents = true;
+        }
+      });
+    }
+    
+    // Iterate through weeks and days to check for incidents
+    Object.entries(weeklyData[agentName]).forEach(([weekKey, weekData]) => {
+      if (!weekData.tickets) return;
+      
+      // Scenario A: Include all data
+      scenarioA.totalTickets += weekData.tickets || 0;
+      scenarioA.totalGood += weekData.ticketsGood || 0;
+      
+      // Scenario B: Exclude weeks with incidents
+      // We need to check if this week contains incident days
+      const weekIndex = parseInt(weekKey);
+      if (weekConfig && weekConfig[weekIndex]) {
+        const week = weekConfig[weekIndex];
+        const startDate = new Date(week.startDate);
+        const endDate = new Date(week.endDate);
+        
+        // Check if any day in this week has an incident
+        let weekHasIncident = false;
+        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+          const dateStr = d.toISOString().split('T')[0];
+          if (incidentDates.has(dateStr)) {
+            weekHasIncident = true;
+            break;
+          }
+        }
+        
+        // If week has no incidents, include in scenario B
+        if (!weekHasIncident) {
+          scenarioB.totalTickets += weekData.tickets || 0;
+          scenarioB.totalGood += weekData.ticketsGood || 0;
+        }
+      } else {
+        // If no week config, include in scenario B (no way to check dates)
+        scenarioB.totalTickets += weekData.tickets || 0;
+        scenarioB.totalGood += weekData.ticketsGood || 0;
+      }
+    });
+    
+    const scenarioAPct = scenarioA.totalTickets > 0 
+      ? Math.round((scenarioA.totalGood / scenarioA.totalTickets) * 100) 
+      : null;
+    const scenarioBPct = scenarioB.totalTickets > 0 
+      ? Math.round((scenarioB.totalGood / scenarioB.totalTickets) * 100) 
+      : null;
+    
+    const deviation = (scenarioAPct !== null && scenarioBPct !== null) 
+      ? scenarioBPct - scenarioAPct 
+      : 0;
+    
+    return {
+      scenarioA: { pct: scenarioAPct, ...scenarioA },
+      scenarioB: { pct: scenarioBPct, ...scenarioB },
+      deviation,
+      hasIncidents
+    };
   }
 };
 

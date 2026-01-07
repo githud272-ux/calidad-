@@ -603,6 +603,22 @@
                 <p>Seleccione un mes para ver las estadísticas de auditorías</p>
               </div>
             </div>
+
+            <!-- CSAT Dual Scenario Comparison -->
+            <div id="csatComparisonContainer" style="margin-top: 1.5rem; display: none;">
+              <div style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(217, 119, 6, 0.05)); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 0.75rem; padding: 1.5rem; margin-bottom: 1.5rem;">
+                <h3 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem 0; color: var(--text-primary);">
+                  <i class="fas fa-balance-scale"></i> Comparativa de Satisfacción (CSAT)
+                </h3>
+                <p style="color: var(--text-muted); margin: 0; font-size: 0.9rem;">
+                  Análisis de la métrica real vs. métrica ajustada (excluyendo días con incidencias sistémicas)
+                </p>
+              </div>
+              
+              <div id="csatComparisonContent">
+                <!-- Content will be dynamically populated -->
+              </div>
+            </div>
           </div>
         </div>
 

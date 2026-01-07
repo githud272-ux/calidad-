@@ -6985,6 +6985,14 @@ const App = {
     stats = DataManager.calculateAuditStatistics(audits);
 
     this.renderStatistics(stats, monthName, year, displayName, selectedTeam, selectedAgent);
+    
+    // Load CSAT comparison if a team is selected
+    if (selectedTeam) {
+      this.loadCSATComparison(year, monthIndex, selectedTeam, selectedAgent);
+    } else {
+      // Hide CSAT comparison when no team selected
+      document.getElementById('csatComparisonContainer').style.display = 'none';
+    }
   },
 
   renderStatistics(stats, monthName, year, teamName, teamId, selectedAgent) {
@@ -7488,6 +7496,189 @@ const App = {
     if (this.currentView === 'statistics') {
       this.loadStatistics();
     }
+  },
+
+  // ==================== CSAT COMPARISON ====================
+
+  loadCSATComparison(year, month, teamId, selectedAgent) {
+    const container = document.getElementById('csatComparisonContainer');
+    const content = document.getElementById('csatComparisonContent');
+    
+    // Get all agents from the team
+    const teams = DataManager.getAllTeams();
+    const team = teams[teamId];
+    
+    if (!team || !team.members) {
+      container.style.display = 'none';
+      return;
+    }
+
+    let agents = team.members.map(m => m.name);
+    
+    // If specific agent selected, filter to that agent
+    if (selectedAgent) {
+      agents = agents.filter(name => name === selectedAgent);
+    }
+
+    // Calculate satisfaction for each agent with dual scenarios
+    const agentComparisons = [];
+    agents.forEach(agentName => {
+      const comparison = DataManager.calculateAgentSatisfactionWithIncidents(agentName, year, month, teamId);
+      if (comparison.scenarioA.totalTickets > 0 || comparison.scenarioB.totalTickets > 0) {
+        agentComparisons.push({
+          name: agentName,
+          ...comparison
+        });
+      }
+    });
+
+    if (agentComparisons.length === 0) {
+      container.style.display = 'none';
+      return;
+    }
+
+    // Calculate team averages
+    const teamScenarioA = { totalTickets: 0, totalGood: 0 };
+    const teamScenarioB = { totalTickets: 0, totalGood: 0 };
+    
+    agentComparisons.forEach(agent => {
+      teamScenarioA.totalTickets += agent.scenarioA.totalTickets;
+      teamScenarioA.totalGood += agent.scenarioA.totalGood;
+      teamScenarioB.totalTickets += agent.scenarioB.totalTickets;
+      teamScenarioB.totalGood += agent.scenarioB.totalGood;
+    });
+
+    const teamScenarioAPct = teamScenarioA.totalTickets > 0 
+      ? Math.round((teamScenarioA.totalGood / teamScenarioA.totalTickets) * 100) 
+      : 0;
+    const teamScenarioBPct = teamScenarioB.totalTickets > 0 
+      ? Math.round((teamScenarioB.totalGood / teamScenarioB.totalTickets) * 100) 
+      : 0;
+    const teamDeviation = teamScenarioBPct - teamScenarioAPct;
+
+    // Sort by deviation (most impacted first)
+    agentComparisons.sort((a, b) => Math.abs(b.deviation) - Math.abs(a.deviation));
+
+    // Render the comparison
+    container.style.display = 'block';
+    
+    let html = `
+      <!-- Team Summary -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
+        <div style="background: white; border: 2px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+            <div style="width: 12px; height: 12px; border-radius: 50%; background: #3b82f6;"></div>
+            <h4 style="font-size: 1rem; font-weight: 700; margin: 0; color: var(--text-primary);">
+              Escenario A - Métrica Real
+            </h4>
+          </div>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+            Incluye todos los tickets y calificaciones sin exclusiones
+          </p>
+          <div style="font-size: 2.5rem; font-weight: 700; color: #3b82f6;">${teamScenarioAPct}%</div>
+          <div style="font-size: 0.9rem; color: var(--text-muted);">
+            ${teamScenarioA.totalGood.toLocaleString()} buenos de ${teamScenarioA.totalTickets.toLocaleString()} tickets
+          </div>
+        </div>
+
+        <div style="background: white; border: 2px solid #10b981; border-radius: 0.75rem; padding: 1.25rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+            <div style="width: 12px; height: 12px; border-radius: 50%; background: #10b981;"></div>
+            <h4 style="font-size: 1rem; font-weight: 700; margin: 0; color: var(--text-primary);">
+              Escenario B - Métrica Ajustada
+            </h4>
+          </div>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+            Excluye días con incidencias sistémicas registradas
+          </p>
+          <div style="font-size: 2.5rem; font-weight: 700; color: #10b981;">${teamScenarioBPct}%</div>
+          <div style="font-size: 0.9rem; color: var(--text-muted);">
+            ${teamScenarioB.totalGood.toLocaleString()} buenos de ${teamScenarioB.totalTickets.toLocaleString()} tickets
+          </div>
+          ${teamDeviation !== 0 ? `
+            <div style="margin-top: 0.75rem; padding: 0.5rem; background: ${teamDeviation > 0 ? '#dcfce7' : '#fee2e2'}; border-radius: 0.5rem;">
+              <span style="font-weight: 600; color: ${teamDeviation > 0 ? '#16a34a' : '#dc2626'};">
+                ${teamDeviation > 0 ? '↑' : '↓'} ${Math.abs(teamDeviation)}% ${teamDeviation > 0 ? 'mejor' : 'peor'} sin incidencias
+              </span>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+
+      <!-- Agent Breakdown -->
+      <div style="background: white; border-radius: 0.75rem; padding: 1.25rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: var(--text-primary);">
+          <i class="fas fa-users"></i> Análisis por Agente
+        </h4>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Agente</th>
+                <th style="text-align: center;">Escenario A<br><small>(Real)</small></th>
+                <th style="text-align: center;">Escenario B<br><small>(Ajustado)</small></th>
+                <th style="text-align: center;">Desviación</th>
+                <th style="text-align: center;">Impacto</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${agentComparisons.map(agent => {
+                const impactColor = agent.deviation === 0 ? '#6b7280' : agent.deviation > 0 ? '#16a34a' : '#dc2626';
+                const impactText = agent.deviation === 0 ? 'Sin cambio' : 
+                  agent.deviation > 0 ? 'Mejora' : 'Deterioro';
+                const scenarioAPct = agent.scenarioA.pct !== null ? agent.scenarioA.pct + '%' : '—';
+                const scenarioBPct = agent.scenarioB.pct !== null ? agent.scenarioB.pct + '%' : '—';
+                
+                return `
+                  <tr>
+                    <td style="font-weight: 600;">${agent.name}</td>
+                    <td style="text-align: center;">
+                      <span style="font-weight: 600; color: #3b82f6;">${scenarioAPct}</span>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">
+                        ${agent.scenarioA.totalTickets} tickets
+                      </div>
+                    </td>
+                    <td style="text-align: center;">
+                      <span style="font-weight: 600; color: #10b981;">${scenarioBPct}</span>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">
+                        ${agent.scenarioB.totalTickets} tickets
+                      </div>
+                    </td>
+                    <td style="text-align: center;">
+                      <span style="font-weight: 700; color: ${impactColor};">
+                        ${agent.deviation > 0 ? '+' : ''}${agent.deviation}%
+                      </span>
+                    </td>
+                    <td style="text-align: center;">
+                      <span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.85rem; font-weight: 600; background: ${agent.deviation === 0 ? '#f3f4f6' : agent.deviation > 0 ? '#dcfce7' : '#fee2e2'}; color: ${impactColor};">
+                        ${impactText}
+                      </span>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Insights -->
+      ${teamDeviation !== 0 ? `
+        <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 1px solid #93c5fd; border-radius: 0.75rem; padding: 1.25rem; margin-top: 1.5rem;">
+          <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 0.75rem 0; color: #1e40af;">
+            <i class="fas fa-lightbulb"></i> Análisis de Desviación
+          </h4>
+          <p style="margin: 0; font-size: 0.9rem; line-height: 1.6; color: #1e3a8a;">
+            ${teamDeviation > 0 
+              ? `Las incidencias sistémicas afectaron negativamente la satisfacción en un <strong>${Math.abs(teamDeviation)}%</strong>. Al excluir estos eventos, el rendimiento real del equipo es superior.` 
+              : `El Escenario B muestra un rendimiento ${Math.abs(teamDeviation)}% inferior, lo que podría indicar problemas adicionales más allá de las incidencias registradas.`
+            }
+          </p>
+        </div>
+      ` : ''}
+    `;
+
+    content.innerHTML = html;
   }
 };
 
