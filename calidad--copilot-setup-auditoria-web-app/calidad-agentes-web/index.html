@@ -116,6 +116,10 @@
             <i class="fas fa-clock"></i>
             <span>Horas de Conexión</span>
           </button>
+          <button class="nav-btn stats-access" data-view="statistics">
+            <i class="fas fa-chart-pie"></i>
+            <span>Estadísticas</span>
+          </button>
           <button class="nav-btn only-editor" data-view="teams">
             <i class="fas fa-users"></i>
             <span>Gestión de Equipos</span>
@@ -485,6 +489,59 @@
               <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
                 <i class="fas fa-clock" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
                 <p>Seleccione un mes para ver las horas de conexión</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Statistics View -->
+        <div id="statisticsView" class="view-section hidden">
+          <div class="glass" style="padding: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;">
+              <div>
+                <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0 0 0.5rem 0;">
+                  <i class="fas fa-chart-pie"></i> Estadísticas de Auditorías
+                </h2>
+                <p style="color: var(--text-muted); margin: 0;">
+                  Análisis detallado del rendimiento y deficiencias en auditorías
+                </p>
+              </div>
+              <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                <div style="min-width: 200px;" class="stats-team-filter">
+                  <label class="label-small" for="filterTeamStats">
+                    <i class="fas fa-users"></i> Filtrar por Equipo
+                  </label>
+                  <select id="filterTeamStats" class="input-dark" style="width: 100%;">
+                    <option value="">Todos los Equipos</option>
+                  </select>
+                </div>
+                <div style="min-width: 200px;">
+                  <label class="label-small" for="filterMonthStats">
+                    <i class="fas fa-calendar-alt"></i> Seleccionar Mes
+                  </label>
+                  <select id="filterMonthStats" class="input-dark" style="width: 100%;">
+                    <option value="">Seleccionar mes...</option>
+                    <option value="0">Enero</option>
+                    <option value="1">Febrero</option>
+                    <option value="2">Marzo</option>
+                    <option value="3">Abril</option>
+                    <option value="4">Mayo</option>
+                    <option value="5">Junio</option>
+                    <option value="6">Julio</option>
+                    <option value="7">Agosto</option>
+                    <option value="8">Septiembre</option>
+                    <option value="9">Octubre</option>
+                    <option value="10">Noviembre</option>
+                    <option value="11">Diciembre</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div id="statisticsContainer">
+              <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                <i class="fas fa-chart-pie" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+                <p>Seleccione un mes para ver las estadísticas de auditorías</p>
               </div>
             </div>
           </div>

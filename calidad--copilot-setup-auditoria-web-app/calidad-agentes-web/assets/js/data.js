@@ -1172,6 +1172,271 @@ const DataManager = {
       allData[agentName][weekIndex].reason = reason;
       this.saveConnectionHoursData(year, month, allData);
     }
+  },
+
+  // Statistics Module - Audit Statistics Calculations
+  // Define all audit criteria for statistics
+  AUDIT_CRITERIA: {
+    empatia: [
+      { id: 'metodoRided', name: 'MÉTODO RIDED', description: 'Bienvenida, Indagación, Solución, Escucha Empática, Despedida' },
+      { id: 'lenguajePositivo', name: 'LENGUAJE POSITIVO', description: 'Reconocimiento del contexto y estado del cliente. Cortesía' },
+      { id: 'acompanamiento', name: 'ACOMPAÑAMIENTO', description: 'No abandono. Gestión del tiempo de espera' },
+      { id: 'personalizacion', name: 'PERSONALIZACIÓN', description: 'Adaptación de plantillas. Evitar repetición' },
+      { id: 'estructura', name: 'ESTRUCTURA', description: 'Consolidación de mensajes y ritmo de conversación' },
+      { id: 'usoIaOrtografia', name: 'USO DE IA, ORTOGRAFÍA Y EMOJIS', description: 'Aplicación de IA, escritura correcta y comunicación visual adecuada' }
+    ],
+    gestion: {
+      ticket: [
+        { id: 'estadosTicket', name: 'Estados del Ticket', description: 'Proceso correcto en Zendesk' },
+        { id: 'ausenciaCliente', name: 'Ausencia del Cliente', description: 'Manejo apropiado de no respuesta' },
+        { id: 'validacionHistorial', name: 'Validación del Historial', description: 'Revisión de incidencias previas' },
+        { id: 'tipificacionCriterio', name: 'Tipificación', description: 'Clasificación correcta del ticket' },
+        { id: 'retencionTickets', name: 'Retención de Tickets', description: 'Mantener tickets activos apropiadamente' },
+        { id: 'tiempoRespuesta', name: 'Tiempo de Respuesta', description: 'Cumplimiento de tiempos' },
+        { id: 'tiempoGestion', name: 'Tiempo de Gestión', description: 'Eficiencia en el manejo' }
+      ],
+      conocimiento: [
+        { id: 'serviciosPromociones', name: 'Servicios y Promociones', description: 'Conocimiento completo de ofertas' },
+        { id: 'informacionVeraz', name: 'Información Veraz', description: 'Datos correctos y verificables' },
+        { id: 'parlamentosContingencia', name: 'Parlamentos de Contingencia', description: 'Guiones para situaciones difíciles' },
+        { id: 'honestidadTransparencia', name: 'Honestidad y Transparencia', description: 'Comunicación clara y directa' }
+      ],
+      herramientas: [
+        { id: 'rideryOffice', name: 'Ridery Office', description: 'Dominio de plataforma principal' },
+        { id: 'adminZendesk', name: 'Admin y Zendesk', description: 'Herramientas administrativas' },
+        { id: 'driveManuales', name: 'Drive y Manuales', description: 'Consulta de documentación' },
+        { id: 'slack', name: 'Slack', description: 'Comunicación interna' },
+        { id: 'generacionReportes', name: 'Generación de Reportes', description: 'Creación de informes' },
+        { id: 'cargaIncidencias', name: 'Carga de Incidencias', description: 'Registro apropiado' }
+      ]
+    }
+  },
+
+  // Get audits for a specific month and optionally filter by team
+  getAuditsForStatistics(year, month, teamId = null) {
+    const audits = this.getAllAudits();
+    return audits.filter(audit => {
+      const auditDate = new Date(audit.auditDate || audit.date);
+      const matchesMonth = auditDate.getFullYear() === year && auditDate.getMonth() === month;
+      const matchesTeam = !teamId || audit.teamId === teamId;
+      return matchesMonth && matchesTeam;
+    });
+  },
+
+  // Calculate statistics for a given set of audits
+  calculateAuditStatistics(audits) {
+    if (!audits || audits.length === 0) {
+      return null;
+    }
+
+    const stats = {
+      totalAudits: audits.length,
+      averageScore: 0,
+      scoreDistribution: { excellent: 0, good: 0, regular: 0, poor: 0 },
+      criteriaDeficiencies: {},
+      pillarDeficiencies: { empatia: 0, gestion: 0 },
+      agentDeficiencies: {},
+      tipificacionImpact: {},
+      agentsByPillarIssue: { empatia: [], gestion: [] },
+      topDeficientCriteria: [],
+      agentRankings: []
+    };
+
+    // Initialize criteria deficiencies
+    this.AUDIT_CRITERIA.empatia.forEach(c => {
+      stats.criteriaDeficiencies[c.id] = { count: 0, agents: [], category: 'empatia', name: c.name };
+    });
+    this.AUDIT_CRITERIA.gestion.ticket.forEach(c => {
+      stats.criteriaDeficiencies[c.id] = { count: 0, agents: [], category: 'gestion-ticket', name: c.name };
+    });
+    this.AUDIT_CRITERIA.gestion.conocimiento.forEach(c => {
+      stats.criteriaDeficiencies[c.id] = { count: 0, agents: [], category: 'gestion-conocimiento', name: c.name };
+    });
+    this.AUDIT_CRITERIA.gestion.herramientas.forEach(c => {
+      stats.criteriaDeficiencies[c.id] = { count: 0, agents: [], category: 'gestion-herramientas', name: c.name };
+    });
+
+    let totalScore = 0;
+
+    // Process each audit
+    audits.forEach(audit => {
+      const score = parseFloat(audit.score || 0);
+      totalScore += score;
+
+      // Score distribution
+      if (score >= 95) stats.scoreDistribution.excellent++;
+      else if (score >= 80) stats.scoreDistribution.good++;
+      else if (score >= 60) stats.scoreDistribution.regular++;
+      else stats.scoreDistribution.poor++;
+
+      // Initialize agent stats if not exists
+      if (!stats.agentDeficiencies[audit.agentName]) {
+        stats.agentDeficiencies[audit.agentName] = {
+          totalAudits: 0,
+          totalScore: 0,
+          empatiaIssues: 0,
+          gestionIssues: 0,
+          criteriaIssues: {},
+          teamId: audit.teamId
+        };
+      }
+      stats.agentDeficiencies[audit.agentName].totalAudits++;
+      stats.agentDeficiencies[audit.agentName].totalScore += score;
+
+      // Tipificación impact
+      const tipificacion = audit.tipificacion || 'Sin tipificación';
+      if (!stats.tipificacionImpact[tipificacion]) {
+        stats.tipificacionImpact[tipificacion] = { count: 0, totalScore: 0, deficiencies: 0 };
+      }
+      stats.tipificacionImpact[tipificacion].count++;
+      stats.tipificacionImpact[tipificacion].totalScore += score;
+      if (score < 80) {
+        stats.tipificacionImpact[tipificacion].deficiencies++;
+      }
+
+      // Check evaluation data for deficiencies
+      const evaluation = audit.evaluationData || {};
+      let empatiaDeficiencyCount = 0;
+      let gestionDeficiencyCount = 0;
+
+      // Check empatia criteria
+      this.AUDIT_CRITERIA.empatia.forEach(criterion => {
+        const passed = evaluation.empatia && evaluation.empatia[criterion.id];
+        if (!passed) {
+          empatiaDeficiencyCount++;
+          stats.criteriaDeficiencies[criterion.id].count++;
+          if (!stats.criteriaDeficiencies[criterion.id].agents.includes(audit.agentName)) {
+            stats.criteriaDeficiencies[criterion.id].agents.push(audit.agentName);
+          }
+          if (!stats.agentDeficiencies[audit.agentName].criteriaIssues[criterion.id]) {
+            stats.agentDeficiencies[audit.agentName].criteriaIssues[criterion.id] = 0;
+          }
+          stats.agentDeficiencies[audit.agentName].criteriaIssues[criterion.id]++;
+        }
+      });
+
+      // Check gestion criteria (ticket, conocimiento, herramientas)
+      const gestionCategories = ['ticket', 'conocimiento', 'herramientas'];
+      gestionCategories.forEach(cat => {
+        this.AUDIT_CRITERIA.gestion[cat].forEach(criterion => {
+          const passed = evaluation.gestion && evaluation.gestion[cat] && evaluation.gestion[cat][criterion.id];
+          if (!passed) {
+            gestionDeficiencyCount++;
+            stats.criteriaDeficiencies[criterion.id].count++;
+            if (!stats.criteriaDeficiencies[criterion.id].agents.includes(audit.agentName)) {
+              stats.criteriaDeficiencies[criterion.id].agents.push(audit.agentName);
+            }
+            if (!stats.agentDeficiencies[audit.agentName].criteriaIssues[criterion.id]) {
+              stats.agentDeficiencies[audit.agentName].criteriaIssues[criterion.id] = 0;
+            }
+            stats.agentDeficiencies[audit.agentName].criteriaIssues[criterion.id]++;
+          }
+        });
+      });
+
+      // Track pillar issues
+      if (empatiaDeficiencyCount > 0) {
+        stats.pillarDeficiencies.empatia++;
+        stats.agentDeficiencies[audit.agentName].empatiaIssues++;
+      }
+      if (gestionDeficiencyCount > 0) {
+        stats.pillarDeficiencies.gestion++;
+        stats.agentDeficiencies[audit.agentName].gestionIssues++;
+      }
+    });
+
+    // Calculate average score
+    stats.averageScore = Math.round((totalScore / audits.length) * 100) / 100;
+
+    // Calculate percentages for criteria deficiencies
+    Object.keys(stats.criteriaDeficiencies).forEach(criterionId => {
+      const deficiency = stats.criteriaDeficiencies[criterionId];
+      deficiency.percentage = Math.round((deficiency.count / audits.length) * 100);
+    });
+
+    // Calculate tipificación averages and percentages
+    Object.keys(stats.tipificacionImpact).forEach(tip => {
+      const impact = stats.tipificacionImpact[tip];
+      impact.averageScore = Math.round((impact.totalScore / impact.count) * 100) / 100;
+      impact.deficiencyPercentage = Math.round((impact.deficiencies / impact.count) * 100);
+      impact.impactPercentage = Math.round((impact.count / audits.length) * 100);
+    });
+
+    // Get top deficient criteria (sorted by count)
+    stats.topDeficientCriteria = Object.entries(stats.criteriaDeficiencies)
+      .map(([id, data]) => ({ id, ...data }))
+      .filter(c => c.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    // Identify agents with pillar issues
+    Object.entries(stats.agentDeficiencies).forEach(([agentName, data]) => {
+      if (data.empatiaIssues > 0) {
+        const empatiaIssueRate = Math.round((data.empatiaIssues / data.totalAudits) * 100);
+        if (empatiaIssueRate >= 30) {
+          stats.agentsByPillarIssue.empatia.push({
+            name: agentName,
+            issueCount: data.empatiaIssues,
+            totalAudits: data.totalAudits,
+            issueRate: empatiaIssueRate
+          });
+        }
+      }
+      if (data.gestionIssues > 0) {
+        const gestionIssueRate = Math.round((data.gestionIssues / data.totalAudits) * 100);
+        if (gestionIssueRate >= 30) {
+          stats.agentsByPillarIssue.gestion.push({
+            name: agentName,
+            issueCount: data.gestionIssues,
+            totalAudits: data.totalAudits,
+            issueRate: gestionIssueRate
+          });
+        }
+      }
+    });
+
+    // Sort agents by issue rate
+    stats.agentsByPillarIssue.empatia.sort((a, b) => b.issueRate - a.issueRate);
+    stats.agentsByPillarIssue.gestion.sort((a, b) => b.issueRate - a.issueRate);
+
+    // Agent rankings by average score
+    stats.agentRankings = Object.entries(stats.agentDeficiencies)
+      .map(([name, data]) => ({
+        name,
+        totalAudits: data.totalAudits,
+        averageScore: Math.round((data.totalScore / data.totalAudits) * 100) / 100,
+        empatiaIssueRate: Math.round((data.empatiaIssues / data.totalAudits) * 100),
+        gestionIssueRate: Math.round((data.gestionIssues / data.totalAudits) * 100),
+        teamId: data.teamId
+      }))
+      .sort((a, b) => b.averageScore - a.averageScore);
+
+    return stats;
+  },
+
+  // Get statistics grouped by team
+  getStatisticsByTeam(year, month) {
+    const teams = this.getAllTeams();
+    const teamStats = {};
+
+    Object.keys(teams).forEach(teamId => {
+      const teamAudits = this.getAuditsForStatistics(year, month, teamId);
+      if (teamAudits.length > 0) {
+        teamStats[teamId] = {
+          teamName: teams[teamId].name,
+          teamColor: teams[teamId].color,
+          stats: this.calculateAuditStatistics(teamAudits)
+        };
+      }
+    });
+
+    return teamStats;
+  },
+
+  // Get global statistics for a month
+  getGlobalStatistics(year, month) {
+    const audits = this.getAuditsForStatistics(year, month);
+    return this.calculateAuditStatistics(audits);
   }
 };
 

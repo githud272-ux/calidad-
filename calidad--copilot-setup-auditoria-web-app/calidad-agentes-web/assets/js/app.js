@@ -593,6 +593,17 @@ const App = {
       filterTeamConnectionHours.addEventListener('change', () => this.loadConnectionHours());
     }
 
+    // Statistics filters
+    const filterMonthStats = document.getElementById('filterMonthStats');
+    if (filterMonthStats) {
+      filterMonthStats.addEventListener('change', () => this.loadStatistics());
+    }
+
+    const filterTeamStats = document.getElementById('filterTeamStats');
+    if (filterTeamStats) {
+      filterTeamStats.addEventListener('change', () => this.loadStatistics());
+    }
+
     // Team quality selector for dashboard
     const teamQualitySelector = document.getElementById('teamQualitySelector');
     if (teamQualitySelector) {
@@ -975,6 +986,26 @@ const App = {
       this.populateMonthSelectors();
     }
 
+    // Show/hide statistics navigation for editors, supervisors, and analysts
+    const statsNavBtn = document.querySelectorAll('.nav-btn[data-view="statistics"]');
+    const canAccessStats = user.role === 'admin' || user.role === 'editor' || user.role === 'calidad' || user.role === 'supervisor' || user.role === 'analista';
+    statsNavBtn.forEach(el => {
+      el.style.display = canAccessStats ? 'flex' : 'none';
+    });
+
+    // Show/hide stats team filter based on role
+    const statsTeamFilter = document.querySelector('.stats-team-filter');
+    if (statsTeamFilter) {
+      if (user.role === 'admin' || user.role === 'editor' || user.role === 'calidad') {
+        statsTeamFilter.style.display = 'block';
+      } else if (user.role === 'supervisor' || user.role === 'analista') {
+        // Show filter for supervisors/analysts but they can change teams
+        statsTeamFilter.style.display = 'block';
+      } else {
+        statsTeamFilter.style.display = 'none';
+      }
+    }
+
     // Initialize team dropdowns
     this.initializeTeamFilters();
 
@@ -1082,6 +1113,11 @@ const App = {
         document.getElementById('connectionHoursView').classList.remove('hidden');
         this.initializeConnectionHoursFilters();
         this.loadConnectionHours();
+        break;
+      case 'statistics':
+        document.getElementById('statisticsView').classList.remove('hidden');
+        this.initializeStatisticsFilters();
+        this.loadStatistics();
         break;
     }
   },
@@ -6159,6 +6195,454 @@ const App = {
         reason: reason
       });
     }
+  },
+
+  // Statistics Section Functions
+  initializeStatisticsFilters() {
+    const teams = DataManager.getAllTeams();
+    const userTeam = DataManager.getUserTeam();
+    const isEditor = DataManager.isEditor();
+    const hasSupervisorPerms = DataManager.hasSupervisorPermissions();
+
+    // Populate team filter
+    const filterTeamStats = document.getElementById('filterTeamStats');
+    if (filterTeamStats) {
+      // Clear existing options except the first one
+      while (filterTeamStats.options.length > 1) {
+        filterTeamStats.remove(1);
+      }
+
+      Object.values(teams).forEach(team => {
+        const option = document.createElement('option');
+        option.value = team.id;
+        option.textContent = team.name;
+        filterTeamStats.appendChild(option);
+      });
+
+      // For non-editor users, restrict to their team
+      if (!isEditor && !hasSupervisorPerms && userTeam) {
+        filterTeamStats.value = userTeam;
+        filterTeamStats.disabled = true;
+      } else if (hasSupervisorPerms && userTeam) {
+        filterTeamStats.value = userTeam;
+        filterTeamStats.disabled = false;
+      } else {
+        filterTeamStats.disabled = false;
+      }
+    }
+  },
+
+  loadStatistics() {
+    const filterMonthStats = document.getElementById('filterMonthStats');
+    const selectedMonth = filterMonthStats ? filterMonthStats.value : '';
+
+    if (!selectedMonth) {
+      const container = document.getElementById('statisticsContainer');
+      container.innerHTML = `
+        <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+          <i class="fas fa-chart-pie" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+          <p>Seleccione un mes para ver las estadísticas de auditorías</p>
+        </div>
+      `;
+      return;
+    }
+
+    const parsed = this.parseSelectedMonthValue(selectedMonth);
+    const monthIndex = parsed.monthIndex;
+    const year = parsed.yearOverride ?? this.getEffectiveYearForMonth(monthIndex);
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const monthName = monthNames[monthIndex];
+
+    const filterTeamStats = document.getElementById('filterTeamStats');
+    const selectedTeam = filterTeamStats ? filterTeamStats.value : '';
+
+    let stats;
+    let teamName = 'Todos los Equipos';
+    const teams = DataManager.getAllTeams();
+
+    if (selectedTeam) {
+      const teamAudits = DataManager.getAuditsForStatistics(year, monthIndex, selectedTeam);
+      stats = DataManager.calculateAuditStatistics(teamAudits);
+      teamName = teams[selectedTeam] ? teams[selectedTeam].name : selectedTeam;
+    } else {
+      stats = DataManager.getGlobalStatistics(year, monthIndex);
+    }
+
+    this.renderStatistics(stats, monthName, year, teamName, selectedTeam);
+  },
+
+  renderStatistics(stats, monthName, year, teamName, teamId) {
+    const container = document.getElementById('statisticsContainer');
+    const teams = DataManager.getAllTeams();
+
+    if (!stats || stats.totalAudits === 0) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+          <i class="fas fa-inbox" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+          <p>No hay auditorías registradas para ${monthName} ${year} en ${teamName}</p>
+          <p style="font-size: 0.85rem; margin-top: 0.5rem;">Las estadísticas se reinician cada mes</p>
+        </div>
+      `;
+      return;
+    }
+
+    // Build the statistics HTML
+    let html = `
+      <div style="margin-bottom: 1.5rem;">
+        <h3 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem 0; color: var(--text-primary);">
+          <i class="fas fa-chart-pie"></i> Estadísticas - ${monthName} ${year} - ${teamName}
+        </h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0;">
+          <strong>Nota:</strong> Las estadísticas se reinician mensualmente. Mostrando datos del mes seleccionado.
+        </p>
+      </div>
+
+      <!-- Summary Cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <div style="background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; padding: 1.25rem; border-radius: 0.75rem;">
+          <div style="font-size: 0.85rem; opacity: 0.9;">Total Auditorías</div>
+          <div style="font-size: 2rem; font-weight: 700;">${stats.totalAudits}</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #272883, #1e1f6a); color: white; padding: 1.25rem; border-radius: 0.75rem;">
+          <div style="font-size: 0.85rem; opacity: 0.9;">Promedio de Calidad</div>
+          <div style="font-size: 2rem; font-weight: 700;">${stats.averageScore}%</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; padding: 1.25rem; border-radius: 0.75rem;">
+          <div style="font-size: 0.85rem; opacity: 0.9;">Fallos en Empatía</div>
+          <div style="font-size: 2rem; font-weight: 700;">${Math.round((stats.pillarDeficiencies.empatia / stats.totalAudits) * 100)}%</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #ef4444, #b91c1c); color: white; padding: 1.25rem; border-radius: 0.75rem;">
+          <div style="font-size: 0.85rem; opacity: 0.9;">Fallos en Gestión</div>
+          <div style="font-size: 2rem; font-weight: 700;">${Math.round((stats.pillarDeficiencies.gestion / stats.totalAudits) * 100)}%</div>
+        </div>
+      </div>
+
+      <!-- Score Distribution -->
+      <div style="background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: var(--text-primary);">
+          <i class="fas fa-chart-bar" style="color: #38CEA6;"></i> Distribución de Puntajes
+        </h4>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem;">
+          <div style="text-align: center; padding: 0.75rem; background: #dcfce7; border-radius: 0.5rem;">
+            <div style="font-size: 1.5rem; font-weight: 700; color: #16a34a;">${stats.scoreDistribution.excellent}</div>
+            <div style="font-size: 0.8rem; color: #166534;">Excelente (95%+)</div>
+            <div style="font-size: 0.75rem; color: #6b7280;">${Math.round((stats.scoreDistribution.excellent / stats.totalAudits) * 100)}%</div>
+          </div>
+          <div style="text-align: center; padding: 0.75rem; background: #dbeafe; border-radius: 0.5rem;">
+            <div style="font-size: 1.5rem; font-weight: 700; color: #2563eb;">${stats.scoreDistribution.good}</div>
+            <div style="font-size: 0.8rem; color: #1e40af;">Bueno (80-94%)</div>
+            <div style="font-size: 0.75rem; color: #6b7280;">${Math.round((stats.scoreDistribution.good / stats.totalAudits) * 100)}%</div>
+          </div>
+          <div style="text-align: center; padding: 0.75rem; background: #fef3c7; border-radius: 0.5rem;">
+            <div style="font-size: 1.5rem; font-weight: 700; color: #d97706;">${stats.scoreDistribution.regular}</div>
+            <div style="font-size: 0.8rem; color: #92400e;">Regular (60-79%)</div>
+            <div style="font-size: 0.75rem; color: #6b7280;">${Math.round((stats.scoreDistribution.regular / stats.totalAudits) * 100)}%</div>
+          </div>
+          <div style="text-align: center; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">
+            <div style="font-size: 1.5rem; font-weight: 700; color: #dc2626;">${stats.scoreDistribution.poor}</div>
+            <div style="font-size: 0.8rem; color: #991b1b;">Deficiente (<60%)</div>
+            <div style="font-size: 0.75rem; color: #6b7280;">${Math.round((stats.scoreDistribution.poor / stats.totalAudits) * 100)}%</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top Deficient Criteria -->
+      <div style="background: #fef3f2; border: 1px solid #fecaca; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #b91c1c;">
+          <i class="fas fa-exclamation-triangle"></i> Principales Deficiencias por Criterio
+        </h4>
+        ${stats.topDeficientCriteria.length > 0 ? `
+          <div class="table-scroll">
+            <table class="data-table" style="font-size: 0.85rem; margin: 0;">
+              <thead>
+                <tr style="background: #fff5f5;">
+                  <th>Criterio</th>
+                  <th>Categoría</th>
+                  <th>Fallos</th>
+                  <th>% de Auditorías</th>
+                  <th>Agentes Afectados</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${stats.topDeficientCriteria.map(criterion => `
+                  <tr>
+                    <td><strong>${criterion.name}</strong></td>
+                    <td><span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; background: ${criterion.category === 'empatia' ? '#dcfce7' : '#dbeafe'}; color: ${criterion.category === 'empatia' ? '#166534' : '#1e40af'};">${this.formatCategoryName(criterion.category)}</span></td>
+                    <td style="text-align: center; font-weight: 600; color: #dc2626;">${criterion.count}</td>
+                    <td style="text-align: center;">
+                      <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div style="flex: 1; height: 8px; background: #fee2e2; border-radius: 4px; overflow: hidden;">
+                          <div style="width: ${criterion.percentage}%; height: 100%; background: #ef4444;"></div>
+                        </div>
+                        <span style="font-weight: 600; color: #dc2626;">${criterion.percentage}%</span>
+                      </div>
+                    </td>
+                    <td style="font-size: 0.8rem; color: var(--text-muted);">${criterion.agents.slice(0, 3).join(', ')}${criterion.agents.length > 3 ? ` (+${criterion.agents.length - 3} más)` : ''}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : '<p style="color: var(--text-muted); text-align: center;">No hay deficiencias registradas</p>'}
+      </div>
+    `;
+
+    // Agents with Pillar Issues
+    html += `
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <!-- Empatía Issues -->
+        <div style="background: #fef3c7; border: 1px solid #fcd34d; border-radius: 0.75rem; padding: 1.25rem;">
+          <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #92400e;">
+            <i class="fas fa-heart" style="color: #f59e0b;"></i> Agentes con Deficiencias en Empatía
+          </h4>
+          ${stats.agentsByPillarIssue.empatia.length > 0 ? `
+            <div style="display: grid; gap: 0.5rem;">
+              ${stats.agentsByPillarIssue.empatia.slice(0, 5).map(agent => `
+                <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <strong>${agent.name}</strong>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">${agent.issueCount}/${agent.totalAudits} auditorías con fallos</div>
+                  </div>
+                  <span style="padding: 0.25rem 0.75rem; border-radius: 0.5rem; font-weight: 700; font-size: 0.9rem; background: #fef3c7; color: #92400e;">${agent.issueRate}%</span>
+                </div>
+              `).join('')}
+            </div>
+            ${stats.agentsByPillarIssue.empatia.length > 5 ? `<p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">+${stats.agentsByPillarIssue.empatia.length - 5} agentes más</p>` : ''}
+          ` : '<p style="color: var(--text-muted); text-align: center;">No hay agentes con deficiencias significativas en empatía</p>'}
+        </div>
+
+        <!-- Gestión Issues -->
+        <div style="background: #fee2e2; border: 1px solid #fca5a5; border-radius: 0.75rem; padding: 1.25rem;">
+          <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #991b1b;">
+            <i class="fas fa-cogs" style="color: #ef4444;"></i> Agentes con Deficiencias en Gestión
+          </h4>
+          ${stats.agentsByPillarIssue.gestion.length > 0 ? `
+            <div style="display: grid; gap: 0.5rem;">
+              ${stats.agentsByPillarIssue.gestion.slice(0, 5).map(agent => `
+                <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <strong>${agent.name}</strong>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">${agent.issueCount}/${agent.totalAudits} auditorías con fallos</div>
+                  </div>
+                  <span style="padding: 0.25rem 0.75rem; border-radius: 0.5rem; font-weight: 700; font-size: 0.9rem; background: #fee2e2; color: #991b1b;">${agent.issueRate}%</span>
+                </div>
+              `).join('')}
+            </div>
+            ${stats.agentsByPillarIssue.gestion.length > 5 ? `<p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">+${stats.agentsByPillarIssue.gestion.length - 5} agentes más</p>` : ''}
+          ` : '<p style="color: var(--text-muted); text-align: center;">No hay agentes con deficiencias significativas en gestión</p>'}
+        </div>
+      </div>
+    `;
+
+    // Tipificación Impact Analysis
+    const tipificaciones = Object.entries(stats.tipificacionImpact)
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 10);
+
+    html += `
+      <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #0369a1;">
+          <i class="fas fa-tags" style="color: #0ea5e9;"></i> Impacto por Motivo de Contacto (Tipificación)
+        </h4>
+        ${tipificaciones.length > 0 ? `
+          <div class="table-scroll">
+            <table class="data-table" style="font-size: 0.85rem; margin: 0;">
+              <thead>
+                <tr style="background: #f0f9ff;">
+                  <th>Tipificación</th>
+                  <th style="text-align: center;">Auditorías</th>
+                  <th style="text-align: center;">% del Total</th>
+                  <th style="text-align: center;">Prom. Calidad</th>
+                  <th style="text-align: center;">% con Deficiencias</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${tipificaciones.map(([tip, data]) => `
+                  <tr>
+                    <td><strong>${tip}</strong></td>
+                    <td style="text-align: center;">${data.count}</td>
+                    <td style="text-align: center;">
+                      <div style="display: flex; align-items: center; gap: 0.5rem; justify-content: center;">
+                        <div style="width: 60px; height: 8px; background: #e0f2fe; border-radius: 4px; overflow: hidden;">
+                          <div style="width: ${data.impactPercentage}%; height: 100%; background: #0ea5e9;"></div>
+                        </div>
+                        <span>${data.impactPercentage}%</span>
+                      </div>
+                    </td>
+                    <td style="text-align: center; font-weight: 600; color: ${data.averageScore >= 80 ? '#16a34a' : data.averageScore >= 60 ? '#d97706' : '#dc2626'};">${data.averageScore}%</td>
+                    <td style="text-align: center;">
+                      <span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; font-weight: 600; background: ${data.deficiencyPercentage >= 30 ? '#fee2e2' : data.deficiencyPercentage >= 15 ? '#fef3c7' : '#dcfce7'}; color: ${data.deficiencyPercentage >= 30 ? '#dc2626' : data.deficiencyPercentage >= 15 ? '#d97706' : '#16a34a'};">${data.deficiencyPercentage}%</span>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : '<p style="color: var(--text-muted); text-align: center;">No hay datos de tipificación disponibles</p>'}
+      </div>
+    `;
+
+    // Agent Rankings
+    html += `
+      <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #166534;">
+          <i class="fas fa-trophy" style="color: #22c55e;"></i> Ranking de Agentes
+        </h4>
+        ${stats.agentRankings.length > 0 ? `
+          <div class="table-scroll">
+            <table class="data-table" style="font-size: 0.85rem; margin: 0;">
+              <thead>
+                <tr style="background: #f0fdf4;">
+                  <th style="width: 50px;">#</th>
+                  <th>Agente</th>
+                  <th style="text-align: center;">Auditorías</th>
+                  <th style="text-align: center;">Prom. Calidad</th>
+                  <th style="text-align: center;">% Fallos Empatía</th>
+                  <th style="text-align: center;">% Fallos Gestión</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${stats.agentRankings.slice(0, 15).map((agent, index) => `
+                  <tr>
+                    <td style="text-align: center; font-weight: 700; color: ${index < 3 ? '#f59e0b' : 'var(--text-muted)'};">
+                      ${index < 3 ? ['🥇', '🥈', '🥉'][index] : (index + 1)}
+                    </td>
+                    <td><strong>${agent.name}</strong></td>
+                    <td style="text-align: center;">${agent.totalAudits}</td>
+                    <td style="text-align: center; font-weight: 600; color: ${agent.averageScore >= 90 ? '#16a34a' : agent.averageScore >= 80 ? '#0ea5e9' : agent.averageScore >= 60 ? '#d97706' : '#dc2626'};">${agent.averageScore}%</td>
+                    <td style="text-align: center;">
+                      <span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; background: ${agent.empatiaIssueRate === 0 ? '#dcfce7' : '#fef3c7'}; color: ${agent.empatiaIssueRate === 0 ? '#16a34a' : '#d97706'};">${agent.empatiaIssueRate}%</span>
+                    </td>
+                    <td style="text-align: center;">
+                      <span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; background: ${agent.gestionIssueRate === 0 ? '#dcfce7' : '#fee2e2'}; color: ${agent.gestionIssueRate === 0 ? '#16a34a' : '#dc2626'};">${agent.gestionIssueRate}%</span>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          ${stats.agentRankings.length > 15 ? `<p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem; text-align: center;">Mostrando top 15 de ${stats.agentRankings.length} agentes</p>` : ''}
+        ` : '<p style="color: var(--text-muted); text-align: center;">No hay datos de agentes disponibles</p>'}
+      </div>
+    `;
+
+    // Detailed Criteria Analysis (Expandable)
+    html += `
+      <div style="background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: var(--text-primary);">
+          <i class="fas fa-clipboard-list" style="color: #6366f1;"></i> Análisis Detallado por Criterio
+        </h4>
+        
+        <!-- Empatía Criteria -->
+        <div style="margin-bottom: 1rem;">
+          <h5 style="font-size: 0.9rem; font-weight: 600; margin: 0 0 0.5rem 0; color: #38CEA6; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fas fa-heart"></i> Pilar Empatía (50%)
+          </h5>
+          <div style="display: grid; gap: 0.5rem;">
+            ${DataManager.AUDIT_CRITERIA.empatia.map(criterion => {
+              const deficiency = stats.criteriaDeficiencies[criterion.id] || { count: 0, percentage: 0 };
+              return `
+                <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid ${deficiency.percentage >= 30 ? '#ef4444' : deficiency.percentage >= 15 ? '#f59e0b' : '#38CEA6'};">
+                  <div>
+                    <strong style="font-size: 0.85rem;">${criterion.name}</strong>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">${criterion.description}</div>
+                  </div>
+                  <div style="text-align: right;">
+                    <div style="font-weight: 700; color: ${deficiency.percentage >= 30 ? '#dc2626' : deficiency.percentage >= 15 ? '#d97706' : '#16a34a'};">${deficiency.percentage}%</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">${deficiency.count} fallos</div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Gestión Criteria -->
+        <div>
+          <h5 style="font-size: 0.9rem; font-weight: 600; margin: 0 0 0.5rem 0; color: #f59e0b; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fas fa-cogs"></i> Pilar Gestión (50%)
+          </h5>
+          
+          <!-- Gestión de Ticket -->
+          <div style="margin-bottom: 0.75rem;">
+            <h6 style="font-size: 0.85rem; font-weight: 600; margin: 0 0 0.5rem 0; color: var(--text-primary);">Gestión de Ticket (33%)</h6>
+            <div style="display: grid; gap: 0.5rem;">
+              ${DataManager.AUDIT_CRITERIA.gestion.ticket.map(criterion => {
+                const deficiency = stats.criteriaDeficiencies[criterion.id] || { count: 0, percentage: 0 };
+                return `
+                  <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid ${deficiency.percentage >= 30 ? '#ef4444' : deficiency.percentage >= 15 ? '#f59e0b' : '#f59e0b33'};">
+                    <div>
+                      <strong style="font-size: 0.85rem;">${criterion.name}</strong>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${criterion.description}</div>
+                    </div>
+                    <div style="text-align: right;">
+                      <div style="font-weight: 700; color: ${deficiency.percentage >= 30 ? '#dc2626' : deficiency.percentage >= 15 ? '#d97706' : '#16a34a'};">${deficiency.percentage}%</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${deficiency.count} fallos</div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Conocimiento Integral -->
+          <div style="margin-bottom: 0.75rem;">
+            <h6 style="font-size: 0.85rem; font-weight: 600; margin: 0 0 0.5rem 0; color: var(--text-primary);">Conocimiento Integral (33%)</h6>
+            <div style="display: grid; gap: 0.5rem;">
+              ${DataManager.AUDIT_CRITERIA.gestion.conocimiento.map(criterion => {
+                const deficiency = stats.criteriaDeficiencies[criterion.id] || { count: 0, percentage: 0 };
+                return `
+                  <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid ${deficiency.percentage >= 30 ? '#ef4444' : deficiency.percentage >= 15 ? '#f59e0b' : '#f59e0b33'};">
+                    <div>
+                      <strong style="font-size: 0.85rem;">${criterion.name}</strong>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${criterion.description}</div>
+                    </div>
+                    <div style="text-align: right;">
+                      <div style="font-weight: 700; color: ${deficiency.percentage >= 30 ? '#dc2626' : deficiency.percentage >= 15 ? '#d97706' : '#16a34a'};">${deficiency.percentage}%</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${deficiency.count} fallos</div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Herramientas -->
+          <div>
+            <h6 style="font-size: 0.85rem; font-weight: 600; margin: 0 0 0.5rem 0; color: var(--text-primary);">Uso Estratégico de Herramientas (33%)</h6>
+            <div style="display: grid; gap: 0.5rem;">
+              ${DataManager.AUDIT_CRITERIA.gestion.herramientas.map(criterion => {
+                const deficiency = stats.criteriaDeficiencies[criterion.id] || { count: 0, percentage: 0 };
+                return `
+                  <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid ${deficiency.percentage >= 30 ? '#ef4444' : deficiency.percentage >= 15 ? '#f59e0b' : '#f59e0b33'};">
+                    <div>
+                      <strong style="font-size: 0.85rem;">${criterion.name}</strong>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${criterion.description}</div>
+                    </div>
+                    <div style="text-align: right;">
+                      <div style="font-weight: 700; color: ${deficiency.percentage >= 30 ? '#dc2626' : deficiency.percentage >= 15 ? '#d97706' : '#16a34a'};">${deficiency.percentage}%</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${deficiency.count} fallos</div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    container.innerHTML = html;
+  },
+
+  formatCategoryName(category) {
+    const names = {
+      'empatia': 'Empatía',
+      'gestion-ticket': 'Gestión Ticket',
+      'gestion-conocimiento': 'Conocimiento',
+      'gestion-herramientas': 'Herramientas'
+    };
+    return names[category] || category;
   }
 };
 
