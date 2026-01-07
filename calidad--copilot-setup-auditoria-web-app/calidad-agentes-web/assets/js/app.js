@@ -53,7 +53,7 @@ const App = {
     return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   },
 
-  // Set a day status quickly (Libre / Guardia) from UI
+  // Set a day status quickly (Libre / Guardia / Vacaciones / Clear) from UI
   setConnectionDayStatus(agentName, dateStr, status) {
     const yearFromDate = parseInt(dateStr.split('-')[0], 10);
     const monthIndex = parseInt(dateStr.split('-')[1], 10) - 1;
@@ -69,13 +69,208 @@ const App = {
       return;
     }
 
-    const hours = status === 'guardia' ? 'GUARDIA' : 'Libre';
+    // Handle clear/delete status
+    if (status === 'clear') {
+      DataManager.clearAgentDailyHours(agentName, yearFromDate, monthIndex, targetWeekIndex, dateStr);
+      const d = this.parseLocalDate(dateStr);
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      alert(`Estado borrado para ${agentName} en ${dd}/${mm}.`);
+      this.loadConnectionHours();
+      return;
+    }
+
+    // Get hours label based on status
+    const statusLabels = {
+      'guardia': 'GUARDIA',
+      'libre': 'Libre',
+      'vacaciones': 'VACACIONES'
+    };
+    const hours = statusLabels[status] || status.toUpperCase();
+    const statusDisplayNames = {
+      'guardia': 'GUARDIA',
+      'libre': 'LIBRE',
+      'vacaciones': 'VACACIONES'
+    };
+    
     DataManager.saveAgentDailyHours(agentName, yearFromDate, monthIndex, targetWeekIndex, dateStr, { status, hours });
     const d = this.parseLocalDate(dateStr);
     const dd = String(d.getDate()).padStart(2, '0');
     const mm = String(d.getMonth() + 1).padStart(2, '0');
-    alert(`${status === 'guardia' ? 'GUARDIA' : 'LIBRE'} marcado para ${agentName} en ${dd}/${mm}.`);
+    alert(`${statusDisplayNames[status] || status.toUpperCase()} marcado para ${agentName} en ${dd}/${mm}.`);
     this.loadConnectionHours();
+  },
+
+  // Open the connection status modal for advanced management
+  openConnectionStatusModal(agentName, dateStr) {
+    const modal = document.getElementById('connectionStatusModal');
+    if (!modal) return;
+
+    // Store agent and date in hidden fields
+    document.getElementById('statusModalAgent').value = agentName;
+    document.getElementById('statusModalDate').value = dateStr;
+
+    // Display info
+    const d = this.parseLocalDate(dateStr);
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    document.getElementById('statusModalInfo').textContent = `Agente: ${agentName}`;
+    document.getElementById('statusModalDateDisplay').textContent = `Fecha: ${dd}/${mm}/${yyyy}`;
+
+    // Reset form
+    document.getElementById('statusTypeSelect').value = '';
+    document.getElementById('statusNoteInput').value = '';
+    document.getElementById('cambioOptions').style.display = 'none';
+    const manualHoursInput = document.getElementById('manualHoursInput');
+    if (manualHoursInput) manualHoursInput.value = '';
+    const cambioHoursInput = document.getElementById('cambioHoursInput');
+    if (cambioHoursInput) cambioHoursInput.value = '';
+    const manualHoursOptions = document.getElementById('manualHoursOptions');
+    if (manualHoursOptions) manualHoursOptions.style.display = 'none';
+
+    // Precargar data existente (si la hay)
+    try {
+      const yearFromDate = parseInt(dateStr.split('-')[0], 10);
+      const monthIndex = parseInt(dateStr.split('-')[1], 10) - 1;
+      const weeks = DataManager.ensureWeekConfig(yearFromDate, monthIndex);
+      const targetWeekIndex = weeks.findIndex(w => w.startDate <= dateStr && dateStr <= w.endDate);
+      if (targetWeekIndex !== -1) {
+        const connectionData = DataManager.getConnectionHoursData(yearFromDate, monthIndex);
+        const weekData = connectionData?.[agentName]?.[targetWeekIndex];
+        const dayData = weekData?.days?.[dateStr];
+        if (dayData) {
+          const rawStatus = String(dayData.status || '').trim();
+          const status = rawStatus === 'guardia' ? 'vacante' : rawStatus;
+          const statusSelect = document.getElementById('statusTypeSelect');
+          if (statusSelect) statusSelect.value = status || '';
+
+          const noteEl = document.getElementById('statusNoteInput');
+          if (noteEl) noteEl.value = dayData.note || '';
+
+          // Cargar horas según tipo
+          if (status === 'worked') {
+            const manualHoursInput = document.getElementById('manualHoursInput');
+            if (manualHoursInput) manualHoursInput.value = dayData.hours || '';
+          }
+          if (status === 'cambio') {
+            const cambioHoursInput = document.getElementById('cambioHoursInput');
+            if (cambioHoursInput) cambioHoursInput.value = dayData.hours || '';
+          }
+
+          // Refrescar visibilidad de opciones
+          this.onStatusTypeChange();
+        }
+      }
+    } catch {
+      // noop
+    }
+
+    modal.style.display = 'flex';
+  },
+
+  closeConnectionStatusModal() {
+    const modal = document.getElementById('connectionStatusModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  },
+
+  onStatusTypeChange() {
+    const statusType = document.getElementById('statusTypeSelect').value;
+    const cambioOptions = document.getElementById('cambioOptions');
+    const manualHoursOptions = document.getElementById('manualHoursOptions');
+
+    cambioOptions.style.display = statusType === 'cambio' ? 'block' : 'none';
+    if (manualHoursOptions) {
+      manualHoursOptions.style.display = statusType === 'worked' ? 'block' : 'none';
+    }
+  },
+
+  saveConnectionStatus() {
+    const agentName = document.getElementById('statusModalAgent').value;
+    const dateStr = document.getElementById('statusModalDate').value;
+    const statusType = document.getElementById('statusTypeSelect').value;
+    const note = document.getElementById('statusNoteInput').value.trim();
+
+    if (!agentName || !dateStr) {
+      alert('Error: No se pudo identificar el agente o la fecha.');
+      return;
+    }
+
+    if (!statusType) {
+      alert('Por favor seleccione un tipo de estado.');
+      return;
+    }
+
+    const yearFromDate = parseInt(dateStr.split('-')[0], 10);
+    const monthIndex = parseInt(dateStr.split('-')[1], 10) - 1;
+    const weeks = DataManager.ensureWeekConfig(yearFromDate, monthIndex);
+    const targetWeekIndex = weeks.findIndex(w => w.startDate <= dateStr && dateStr <= w.endDate);
+
+    if (targetWeekIndex === -1) {
+      alert('La fecha seleccionada no pertenece a una semana configurada.');
+      return;
+    }
+
+    const normalizeHms = (raw) => {
+      const str = String(raw || '').trim();
+      if (!str) return '';
+      // Accept H:MM:SS or HH:MM:SS
+      if (!/^\d{1,2}:\d{2}:\d{2}$/.test(str)) return '';
+      const parts = str.split(':');
+      const h = String(parseInt(parts[0], 10) || 0);
+      const m = String(parseInt(parts[1], 10) || 0).padStart(2, '0');
+      const s = String(parseInt(parts[2], 10) || 0).padStart(2, '0');
+      return `${h}:${m}:${s}`;
+    };
+
+    // Build day data
+    const dayData = {
+      status: statusType,
+      hours: this.getStatusHoursLabel(statusType),
+      note: note || ''
+    };
+
+    // Acción: edición manual de horas
+    if (statusType === 'worked') {
+      const manual = normalizeHms(document.getElementById('manualHoursInput')?.value);
+      if (!manual) {
+        alert('Por favor indique las horas en formato H:MM:SS.');
+        return;
+      }
+      dayData.hours = manual;
+    }
+
+    // Handle cambio de guardia
+    if (statusType === 'cambio') {
+      const cambioHours = normalizeHms(document.getElementById('cambioHoursInput')?.value);
+      if (!cambioHours) {
+        alert('Para Cambio de Guardia, indique las horas en formato H:MM:SS.');
+        return;
+      }
+      dayData.hours = cambioHours;
+    }
+
+    // Save the day data
+    DataManager.saveAgentDailyHours(agentName, yearFromDate, monthIndex, targetWeekIndex, dateStr, dayData);
+
+    this.closeConnectionStatusModal();
+    this.loadConnectionHours();
+  },
+
+  getStatusHoursLabel(status) {
+    const labels = {
+      // Compatibilidad legacy: 'guardia' ahora se muestra como VACANTE
+      'guardia': 'VACANTE',
+      'vacante': 'VACANTE',
+      'libre': 'Libre',
+      'vacaciones': 'VACACIONES',
+      'cambio': 'CAMBIO',
+      'cambio_recibido': 'CAMBIO',
+      'worked': ''
+    };
+    return labels[status] || status.toUpperCase();
   },
 
   // Observation Modal
@@ -285,13 +480,15 @@ const App = {
 
       // Parse numeric values (handle comma as decimal separator)
       const tickets = parseInt(values[1]) || 0;
-      const ticketsBad = parseInt(values[2]) || 0;
-      const ticketsGood = parseInt(values[3]) || 0;
-      const firstResponse = parseFloat(values[4].replace(',', '.')) || 0;
-      const resolutionTime = parseFloat(values[5].replace(',', '.')) || 0;
+      const ticketsPerHourRaw = parseFloat(values[2].replace(',', '.')) || 0; // Promedio diario from Excel
+      const ticketsBad = parseInt(values[3]) || 0;
+      const ticketsGood = parseInt(values[4]) || 0;
+      const firstResponse = parseFloat(values[5].replace(',', '.')) || 0;
+      const resolutionTime = parseFloat(values[6].replace(',', '.')) || 0;
+      const firstResponseMinutes = values[7] ? parseFloat(values[7].replace(',', '.')) || 0 : 0;
 
-      // Calculate metrics
-      const ticketsPerHour = tickets > 0 ? tickets / 8 : 0; // Assume 8-hour shift
+      // Use the ticketsPerHour from Excel (promedio diario) if available, otherwise calculate
+      const ticketsPerHour = ticketsPerHourRaw > 0 ? ticketsPerHourRaw : (tickets > 0 ? tickets / 8 : 0);
       const califPct = (tickets > 0) ? ((ticketsGood / tickets) * 100) : 0;
 
       // Save según modo seleccionado
@@ -305,6 +502,7 @@ const App = {
         firstResponse,
         resolutionTime,
         ticketsPerHour,
+        firstResponseMinutes,
         califPct
       };
       if (excelImportMode === 'rango') {
@@ -420,6 +618,44 @@ const App = {
       }
     }
     return 'N/A';
+  },
+
+  // Get member record by agent name
+  getAgentMember(agentName, teams) {
+    for (const teamId in teams) {
+      const team = teams[teamId];
+      if (team?.members) {
+        const member = team.members.find(m => m.name === agentName);
+        if (member) return { teamId, team, member };
+      }
+    }
+    return null;
+  },
+
+  // Rotation days: numbers 0..6 (0=Dom, 1=Lun, ..., 6=Sáb)
+  // Default: según turno (semana -> Lun..Vie, fin de semana -> Sáb/Dom)
+  getAgentRotationDays(agentName, teams) {
+    const found = this.getAgentMember(agentName, teams);
+    const rotationDays = found?.member?.rotationDays;
+    if (Array.isArray(rotationDays) && rotationDays.length > 0) {
+      return Array.from(new Set(rotationDays.map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n >= 0 && n <= 6))).sort((a, b) => a - b);
+    }
+
+    const shift = this.getAgentShift(agentName, teams);
+    const weekendShifts = ['Fin de Semana AM', 'Fin de Semana PM', 'Madrugada Fin de Semana'];
+    if (weekendShifts.includes(shift)) return [0, 6];
+    return [1, 2, 3, 4, 5];
+  },
+
+  // Format seconds to H:MM:SS (allows negative)
+  formatSignedHMS(seconds) {
+    const s = parseInt(seconds, 10) || 0;
+    const sign = s < 0 ? '-' : '';
+    const abs = Math.abs(s);
+    const hours = Math.floor(abs / 3600);
+    const minutes = Math.floor((abs % 3600) / 60);
+    const secs = abs % 60;
+    return `${sign}${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   },
 
   // Initialize application
@@ -593,6 +829,25 @@ const App = {
       filterTeamConnectionHours.addEventListener('change', () => this.loadConnectionHours());
     }
 
+    // Statistics filters
+    const filterMonthStats = document.getElementById('filterMonthStats');
+    if (filterMonthStats) {
+      filterMonthStats.addEventListener('change', () => this.loadStatistics());
+    }
+
+    const filterTeamStats = document.getElementById('filterTeamStats');
+    if (filterTeamStats) {
+      filterTeamStats.addEventListener('change', () => {
+        this.updateAgentStatsFilter();
+        this.loadStatistics();
+      });
+    }
+
+    const filterAgentStats = document.getElementById('filterAgentStats');
+    if (filterAgentStats) {
+      filterAgentStats.addEventListener('change', () => this.loadStatistics());
+    }
+
     // Team quality selector for dashboard
     const teamQualitySelector = document.getElementById('teamQualitySelector');
     if (teamQualitySelector) {
@@ -730,6 +985,9 @@ const App = {
   
   // Setup keyboard navigation for table scrolling
   setupTableKeyboardNavigation() {
+    // Track last interacted table-scroll so arrows work even without focus
+    this._lastTableScroll = this._lastTableScroll || null;
+
     // Add event listeners to all .table-scroll elements
     document.addEventListener('keydown', (e) => {
       const activeElement = document.activeElement;
@@ -738,37 +996,68 @@ const App = {
       const tableScroll = activeElement.classList.contains('table-scroll') 
         ? activeElement 
         : activeElement.closest('.table-scroll');
+
+      const effectiveTableScroll = tableScroll || this._lastTableScroll;
       
-      if (tableScroll) {
+      if (effectiveTableScroll) {
         const scrollAmount = 50; // pixels to scroll
         
         switch(e.key) {
           case 'ArrowLeft':
             e.preventDefault();
-            tableScroll.scrollLeft -= scrollAmount;
+            effectiveTableScroll.scrollLeft -= scrollAmount;
             break;
           case 'ArrowRight':
             e.preventDefault();
-            tableScroll.scrollLeft += scrollAmount;
+            effectiveTableScroll.scrollLeft += scrollAmount;
             break;
           case 'ArrowUp':
             e.preventDefault();
-            tableScroll.scrollTop -= scrollAmount;
+            effectiveTableScroll.scrollTop -= scrollAmount;
             break;
           case 'ArrowDown':
             e.preventDefault();
-            tableScroll.scrollTop += scrollAmount;
+            effectiveTableScroll.scrollTop += scrollAmount;
             break;
         }
       }
     });
     
-    // Make table-scroll elements focusable
+    // Make table-scroll elements focusable and add wheel-to-horizontal-scroll
     const makeTablesFocusable = () => {
       const tables = document.querySelectorAll('.table-scroll');
       tables.forEach(table => {
         if (!table.hasAttribute('tabindex')) {
           table.setAttribute('tabindex', '0');
+        }
+
+        // Track last active table and focus on interaction
+        if (!table.dataset.trackBound) {
+          table.dataset.trackBound = '1';
+          table.addEventListener('mouseenter', () => { this._lastTableScroll = table; });
+          table.addEventListener('pointerdown', () => {
+            this._lastTableScroll = table;
+            table.focus({ preventScroll: true });
+          });
+        }
+
+        // Convert mouse wheel to horizontal scroll when horizontal overflow exists
+        if (!table.dataset.wheelXBound) {
+          table.dataset.wheelXBound = '1';
+          table.addEventListener('wheel', (e) => {
+            // Only if there is horizontal overflow
+            const canScrollX = table.scrollWidth > table.clientWidth;
+            if (!canScrollX) return;
+
+            // If user is already doing horizontal scroll (trackpad), let it be
+            if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+
+            // Use vertical wheel to scroll horizontally
+            if (e.deltaY !== 0) {
+              e.preventDefault();
+              table.scrollLeft += e.deltaY;
+            }
+          }, { passive: false });
         }
       });
     };
@@ -975,6 +1264,26 @@ const App = {
       this.populateMonthSelectors();
     }
 
+    // Show/hide statistics navigation for editors, supervisors, and analysts
+    const statsNavBtn = document.querySelectorAll('.nav-btn[data-view="statistics"]');
+    const canAccessStats = user.role === 'admin' || user.role === 'editor' || user.role === 'calidad' || user.role === 'supervisor' || user.role === 'analista';
+    statsNavBtn.forEach(el => {
+      el.style.display = canAccessStats ? 'flex' : 'none';
+    });
+
+    // Show/hide stats team filter based on role
+    const statsTeamFilter = document.querySelector('.stats-team-filter');
+    if (statsTeamFilter) {
+      if (user.role === 'admin' || user.role === 'editor' || user.role === 'calidad') {
+        statsTeamFilter.style.display = 'block';
+      } else if (user.role === 'supervisor' || user.role === 'analista') {
+        // Show filter for supervisors/analysts but they can change teams
+        statsTeamFilter.style.display = 'block';
+      } else {
+        statsTeamFilter.style.display = 'none';
+      }
+    }
+
     // Initialize team dropdowns
     this.initializeTeamFilters();
 
@@ -1022,20 +1331,9 @@ const App = {
   },
 
   initializeOverlayScrollbars() {
-    // Initialize OverlayScrollbars on table scroll containers
-    if (typeof OverlayScrollbars !== 'undefined') {
-      // Apply to all elements with .table-scroll class
-      document.querySelectorAll('.table-scroll').forEach(element => {
-        OverlayScrollbars(element, {
-          scrollbars: {
-            theme: 'os-theme-dark',
-            visibility: 'auto',
-            autoHide: 'never',
-            autoHideDelay: 800
-          }
-        });
-      });
-    }
+    // Nota: usamos scroll nativo en .table-scroll por compatibilidad (Windows)
+    // y para evitar que el overlay oculte/capture el desplazamiento horizontal.
+    return;
   },
 
   // View management
@@ -1082,6 +1380,11 @@ const App = {
         document.getElementById('connectionHoursView').classList.remove('hidden');
         this.initializeConnectionHoursFilters();
         this.loadConnectionHours();
+        break;
+      case 'statistics':
+        document.getElementById('statisticsView').classList.remove('hidden');
+        this.initializeStatisticsFilters();
+        this.loadStatistics();
         break;
     }
   },
@@ -1588,6 +1891,10 @@ const App = {
       const teamRankings = {};
       
       teamsToShow.forEach(([teamId, team]) => {
+        const params = DataManager.getTeamManagementParams(teamId);
+        const qualityMin = params?.qualityMinPct ?? 83;
+        const satisfactionMin = params?.satisfactionMinPct ?? 90;
+
         // Filter out supervisors and analistas - they are not auditable
         const teamMemberNames = team.members 
           ? team.members.filter(m => m.role !== 'supervisor' && m.role !== 'analista' && m.role !== 'calidad').map(m => m.name) 
@@ -1617,9 +1924,9 @@ const App = {
             };
           });
         
-        // Agents needing improvement: quality < 83% OR satisfaction < 90%
+        // Agents needing improvement: quality < min OR satisfaction < min
         const needsImprovement = allAgents
-          .filter(agent => agent.avgQuality < 83 || (agent.satisfactionTickets > 0 && agent.satisfactionPct < 90))
+          .filter(agent => agent.avgQuality < qualityMin || (agent.satisfactionTickets > 0 && agent.satisfactionPct < satisfactionMin))
           .sort((a, b) => {
             // Sort by combined score (quality + satisfaction) ascending (worst first)
             const scoreA = a.avgQuality + (a.satisfactionTickets > 0 ? a.satisfactionPct : 100);
@@ -1635,7 +1942,7 @@ const App = {
         
         const top2 = excellentAgents.slice(0, 2);
         
-        teamRankings[teamId] = { team, top2, needsImprovement };
+        teamRankings[teamId] = { team, top2, needsImprovement, params: { qualityMin, satisfactionMin } };
       });
       
       container.innerHTML = Object.entries(teamRankings).map(([teamId, data]) => {
@@ -1670,7 +1977,7 @@ const App = {
             ` : ''}
             ${(isEditor || hasSupervisorPerms) && data.needsImprovement.length > 0 ? `
               <div>
-                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">📊 PUEDE MEJORAR (&lt;83% calidad o &lt;90% satisfacción)</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">📊 PUEDE MEJORAR (&lt;${data.params?.qualityMin ?? 83}% calidad o &lt;${data.params?.satisfactionMin ?? 90}% satisfacción)</div>
                 ${data.needsImprovement.map((agent) => `
                   <div style="padding: 0.4rem 0; display: flex; justify-content: space-between; align-items: center;">
                     <div>
@@ -1679,10 +1986,10 @@ const App = {
                       <span style="font-size: 0.85rem; color: var(--text-muted);"> • ${agent.count} auditorías</span>
                     </div>
                     <div style="text-align: right;">
-                      <div style="font-weight: 700; color: ${agent.avgQuality < 83 ? '#ef4444' : '#f59e0b'}; font-size: 1rem;">
+                      <div style="font-weight: 700; color: ${agent.avgQuality < (data.params?.qualityMin ?? 83) ? '#ef4444' : '#f59e0b'}; font-size: 1rem;">
                         🎯 ${agent.avgQuality}%
                       </div>
-                      <div style="font-size: 0.8rem; color: ${agent.satisfactionTickets > 0 && agent.satisfactionPct < 90 ? '#ef4444' : 'var(--text-muted)'};">
+                      <div style="font-size: 0.8rem; color: ${agent.satisfactionTickets > 0 && agent.satisfactionPct < (data.params?.satisfactionMin ?? 90) ? '#ef4444' : 'var(--text-muted)'};">
                         😊 ${agent.satisfactionTickets > 0 ? agent.satisfactionPct + '%' : '—'}
                       </div>
                     </div>
@@ -2236,7 +2543,15 @@ const App = {
       teamsToShow = teamsToShow.filter(team => team.id === userTeam);
     }
     
-    container.innerHTML = teamsToShow.map(team => `
+    container.innerHTML = teamsToShow.map(team => {
+      const params = DataManager.getTeamManagementParams(team.id);
+      const firstGood = params?.firstResponse?.goodMaxMin ?? 25;
+      const resolGood = params?.resolution?.goodMaxMin ?? 60;
+      const resolWarn = params?.resolution?.warnMaxMin ?? 90;
+      const qualityMin = params?.qualityMinPct ?? 83;
+      const satMin = params?.satisfactionMinPct ?? 90;
+
+      return `
       <div class="glass" style="padding: 1.5rem;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid ${team.color};">
           <div>
@@ -2261,6 +2576,44 @@ const App = {
             </button>
           </div>
         </div>
+
+        ${isEditor ? `
+          <div style="margin: 0 0 1rem 0; padding: 0.75rem; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
+              <div style="font-weight: 800; color: var(--text-primary);">
+                <i class="fas fa-sliders-h"></i> Parámetros de gestión
+              </div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">Se guardan por equipo</div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0.75rem;">
+              <div>
+                <label class="label-small">T. primera respuesta OK (min)</label>
+                <input id="mp-fr-good-${team.id}" class="input-dark" type="number" min="0" step="1" value="${firstGood}" style="width: 100%;" />
+              </div>
+              <div>
+                <label class="label-small">T. resolución OK (min)</label>
+                <input id="mp-res-good-${team.id}" class="input-dark" type="number" min="0" step="1" value="${resolGood}" style="width: 100%;" />
+              </div>
+              <div>
+                <label class="label-small">T. resolución A trabajar (min)</label>
+                <input id="mp-res-warn-${team.id}" class="input-dark" type="number" min="0" step="1" value="${resolWarn}" style="width: 100%;" />
+              </div>
+              <div>
+                <label class="label-small">Calidad mínima (%)</label>
+                <input id="mp-quality-min-${team.id}" class="input-dark" type="number" min="0" max="100" step="1" value="${qualityMin}" style="width: 100%;" />
+              </div>
+              <div>
+                <label class="label-small">Satisfacción mínima (%)</label>
+                <input id="mp-sat-min-${team.id}" class="input-dark" type="number" min="0" max="100" step="1" value="${satMin}" style="width: 100%;" />
+              </div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; margin-top: 0.75rem;">
+              <button class="btn-accent" onclick="App.saveTeamManagementParams('${team.id}')" style="background: ${team.color}; color: white; border: none; cursor: pointer; font-size: 0.85rem; padding: 0.45rem 0.9rem;">
+                <i class="fas fa-save"></i> Guardar parámetros
+              </button>
+            </div>
+          </div>
+        ` : ''}
         
         <div style="display: grid; gap: 0.5rem;">
           ${team.members.length === 0 ? '<p class="empty">No hay integrantes en este equipo</p>' : ''}
@@ -2291,7 +2644,8 @@ const App = {
           `).join('')}
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
     
     // Add separate Calidad users section at the bottom (Admin y Calidad)
     if (isAdmin || isEditor) {
@@ -2338,6 +2692,31 @@ const App = {
         </div>
       `;
     }
+  },
+
+  saveTeamManagementParams(teamId) {
+    if (!DataManager.isEditor()) return;
+
+    const firstGood = parseFloat(document.getElementById(`mp-fr-good-${teamId}`)?.value);
+    const resolGood = parseFloat(document.getElementById(`mp-res-good-${teamId}`)?.value);
+    const resolWarn = parseFloat(document.getElementById(`mp-res-warn-${teamId}`)?.value);
+    const qualityMin = parseFloat(document.getElementById(`mp-quality-min-${teamId}`)?.value);
+    const satMin = parseFloat(document.getElementById(`mp-sat-min-${teamId}`)?.value);
+
+    if ([firstGood, resolGood, resolWarn, qualityMin, satMin].some(v => isNaN(v) || v < 0)) {
+      alert('Verifica los valores: deben ser números válidos (>= 0).');
+      return;
+    }
+
+    DataManager.updateTeamManagementParams(teamId, {
+      firstResponse: { goodMaxMin: firstGood },
+      resolution: { goodMaxMin: resolGood, warnMaxMin: resolWarn },
+      qualityMinPct: qualityMin,
+      satisfactionMinPct: satMin
+    });
+
+    alert('Parámetros guardados correctamente.');
+    this.loadTeamsView();
   },
   
   // Get all Calidad users from storage
@@ -3492,6 +3871,8 @@ const App = {
       });
       
       container.innerHTML = fullHTML;
+      // Re-apply custom scrollbars for dynamically added tables
+      this.initializeOverlayScrollbars();
       return;
     }
     
@@ -3565,10 +3946,10 @@ const App = {
       </div>
       
       <div class="table-scroll">
-        <table class="data-table" style="font-size: 0.85rem;">
+        <table class="data-table weekly-metrics-table" style="font-size: 0.85rem;">
           <thead>
             <tr>
-              <th rowspan="2" style="vertical-align: middle; min-width: 150px;">Nombre del Agente</th>
+              <th rowspan="2" style="vertical-align: middle; min-width: 150px; position: sticky; left: 0; background: #f8fafc; z-index: 2;">Nombre del Agente</th>
               <th rowspan="2" style="vertical-align: middle; min-width: 100px; background: rgba(56, 206, 166, 0.1);">Turno</th>
     `;
     
@@ -3628,7 +4009,7 @@ const App = {
       const agentShift = this.getAgentShift(agentName, teams);
       const shiftBadge = this.getShiftBadge(agentShift);
       
-      tableHTML += `<tr><td><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
+      tableHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
       
       // Calculate monthly totals
       let monthlyTotals = {
@@ -3825,6 +4206,7 @@ const App = {
         const avgTicketsPerHour = agentCountForWeek > 0 ? (avgRow.ticketsPerHour[weekIndex] || 0) / agentCountForWeek : 0;
         const avgFirstResp = agentCountForWeek > 0 ? (avgRow.firstResponse[weekIndex] || 0) / agentCountForWeek : 0;
         const avgResol = agentCountForWeek > 0 ? (avgRow.resolutionTime[weekIndex] || 0) / agentCountForWeek : 0;
+        const avgFirstRespMin = avgFirstResp > 0 ? (avgFirstResp / 60) : 0;
         
         // Calculated percentage from totals
         const totalCalifPct = totalTickets > 0 ? ((totalBad + totalGood) / totalTickets * 100) : 0;
@@ -3839,6 +4221,7 @@ const App = {
           <td style="text-align: center;">${totalGood > 0 ? totalGood.toFixed(0) : '-'}</td>
           <td style="text-align: center;">${avgFirstResp > 0 ? avgFirstResp.toFixed(1) : '-'}</td>
           <td style="text-align: center;">${avgResol > 0 ? avgResol.toFixed(1) : '-'}</td>
+          <td style="text-align: center; color: #0ea5e9;">${avgFirstRespMin > 0 ? avgFirstRespMin.toFixed(1) : '-'}</td>
           <td style="text-align: center; color: #0ea5e9;">${totalCalifPct > 0 ? totalCalifPct.toFixed(1) + '%' : '-'}</td>
           <td style="text-align: center; color: #38CEA6;">${avgQuality > 0 ? avgQuality.toFixed(1) + '%' : '-'}</td>
           ${isEditor ? '<td></td>' : ''}
@@ -3852,6 +4235,7 @@ const App = {
       const monthlyAvgTicketsPerHour = monthlyAvg.weekCount > 0 ? monthlyAvg.ticketsPerHour / monthlyAvg.weekCount : 0;
       const monthlyAvgFirstResp = monthlyAvg.weekCount > 0 ? monthlyAvg.firstResponse / monthlyAvg.weekCount : 0;
       const monthlyAvgResol = monthlyAvg.weekCount > 0 ? monthlyAvg.resolutionTime / monthlyAvg.weekCount : 0;
+      const monthlyAvgFirstRespMin = monthlyAvgFirstResp > 0 ? (monthlyAvgFirstResp / 60) : 0;
       const monthlyTotalCalifPct = monthlyTotalTickets > 0 ? ((monthlyTotalBad + monthlyTotalGood) / monthlyTotalTickets * 100) : 0;
       const monthlyAvgQuality = monthlyAvg.qualityCount > 0 ? (monthlyAvg.quality / monthlyAvg.qualityCount) : 0;
       
@@ -3862,6 +4246,7 @@ const App = {
         <td style="text-align: center; background: #f0fdf4;">${monthlyTotalGood > 0 ? monthlyTotalGood.toFixed(0) : '-'}</td>
         <td style="text-align: center; background: #f0fdf4;">${monthlyAvgFirstResp > 0 ? monthlyAvgFirstResp.toFixed(1) : '-'}</td>
         <td style="text-align: center; background: #f0fdf4;">${monthlyAvgResol > 0 ? monthlyAvgResol.toFixed(1) : '-'}</td>
+        <td style="text-align: center; background: #f0fdf4; color: #0ea5e9;">${monthlyAvgFirstRespMin > 0 ? monthlyAvgFirstRespMin.toFixed(1) : '-'}</td>
         <td style="text-align: center; background: #f0fdf4; color: #0ea5e9;">${monthlyTotalCalifPct > 0 ? monthlyTotalCalifPct.toFixed(1) + '%' : '-'}</td>
         <td style="text-align: center; background: #f0fdf4; color: #38CEA6;">${monthlyAvgQuality > 0 ? monthlyAvgQuality.toFixed(1) + '%' : '-'}</td>
         ${isEditor ? '<td style="background: #f0fdf4;"></td>' : ''}
@@ -3872,6 +4257,8 @@ const App = {
     tableHTML += `</tbody></table></div>`;
     
     container.innerHTML = tableHTML;
+    // Re-apply custom scrollbars for dynamically added tables
+    this.initializeOverlayScrollbars();
   },
 
   // Helper function to render weekly metrics table for a single team
@@ -3879,7 +4266,7 @@ const App = {
     if (agentsList.length === 0) return '';
     
     let tableHTML = `
-      <div style="margin-bottom: 2rem; border: 2px solid ${teamColor}; border-radius: 0.75rem; overflow: hidden;">
+      <div style="margin-bottom: 2rem; border: 2px solid ${teamColor}; border-radius: 0.75rem; overflow: visible;">
         <div style="background: ${teamColor}; color: white; padding: 0.75rem 1rem;">
           <h4 style="margin: 0; font-size: 1rem; font-weight: 700;">
             <i class="fas fa-users"></i> ${teamName}
@@ -3887,10 +4274,10 @@ const App = {
         </div>
         
         <div class="table-scroll">
-          <table class="data-table" style="font-size: 0.85rem; margin: 0;">
+          <table class="data-table weekly-metrics-table" style="font-size: 0.85rem; margin: 0;">
             <thead>
               <tr>
-                <th rowspan="2" style="vertical-align: middle; min-width: 150px;">Nombre del Agente</th>
+                <th rowspan="2" style="vertical-align: middle; min-width: 150px; position: sticky; left: 0; background: #f8fafc; z-index: 2;">Nombre del Agente</th>
                 <th rowspan="2" style="vertical-align: middle; min-width: 100px; background: rgba(56, 206, 166, 0.1);">Turno</th>
     `;
     
@@ -3950,7 +4337,7 @@ const App = {
       const agentShift = this.getAgentShift(agentName, teams);
       const shiftBadge = this.getShiftBadge(agentShift);
       
-      tableHTML += `<tr><td><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
+      tableHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
       
       // Calculate monthly totals
       let monthlyTotals = {
@@ -4056,6 +4443,146 @@ const App = {
         ${isEditor ? '<td style="background: #f0fdf4;"></td>' : ''}
       </tr>`;
     });
+
+    // Fila PROMEDIO para el equipo (cuando se ve "Todos los equipos")
+    if (agentsList.length > 0) {
+      const avgRow = { tickets: [], ticketsPerHour: [], ticketsBad: [], ticketsGood: [], firstResponse: [], resolutionTime: [], agentCount: [], quality: [], qualityCount: [] };
+      const monthlyAvg = { tickets: 0, ticketsBad: 0, ticketsGood: 0, firstResponse: 0, resolutionTime: 0, weekCount: 0, ticketsPerHour: 0, ticketsPerHourCount: 0, quality: 0, qualityCount: 0, agentCount: 0 };
+
+      agentsList.forEach(agentName => {
+        weeks.forEach((week, weekIndex) => {
+          const weekData = manualData[agentName] && manualData[agentName][weekIndex];
+          const weekMetric = weekMetrics.find(wm => wm.week.startDate === week.startDate && wm.week.endDate === week.endDate);
+          const audits = weekMetric && weekMetric.agentMetrics[agentName] ? weekMetric.agentMetrics[agentName] : null;
+
+          if (weekData && (weekData.tickets > 0 || weekData.firstResponse > 0 || weekData.resolutionTime > 0)) {
+            avgRow.tickets[weekIndex] = (avgRow.tickets[weekIndex] || 0) + (weekData.tickets || 0);
+            avgRow.ticketsBad[weekIndex] = (avgRow.ticketsBad[weekIndex] || 0) + (weekData.ticketsBad || 0);
+            avgRow.ticketsGood[weekIndex] = (avgRow.ticketsGood[weekIndex] || 0) + (weekData.ticketsGood || 0);
+            avgRow.firstResponse[weekIndex] = (avgRow.firstResponse[weekIndex] || 0) + (weekData.firstResponse || 0);
+            avgRow.resolutionTime[weekIndex] = (avgRow.resolutionTime[weekIndex] || 0) + (weekData.resolutionTime || 0);
+            if (weekData.ticketsPerHour > 0) {
+              avgRow.ticketsPerHour[weekIndex] = (avgRow.ticketsPerHour[weekIndex] || 0) + (weekData.ticketsPerHour || 0);
+            }
+            avgRow.agentCount[weekIndex] = (avgRow.agentCount[weekIndex] || 0) + 1;
+          }
+
+          if (audits && audits.tickets > 0) {
+            const avgScore = Math.round(audits.totalScore / audits.tickets);
+            avgRow.quality[weekIndex] = (avgRow.quality[weekIndex] || 0) + avgScore;
+            avgRow.qualityCount[weekIndex] = (avgRow.qualityCount[weekIndex] || 0) + 1;
+          }
+        });
+
+        // Monthly aggregation for this agent
+        let agentWeekCount = 0;
+        let agentTickets = 0;
+        let agentBad = 0;
+        let agentGood = 0;
+        let agentFirstResp = 0;
+        let agentResol = 0;
+        let agentTphSum = 0;
+        let agentTphCount = 0;
+        let agentQualitySum = 0;
+        let agentQualityCount = 0;
+
+        weeks.forEach((week, weekIndex) => {
+          const weekData = manualData[agentName] && manualData[agentName][weekIndex];
+          const weekMetric = weekMetrics.find(wm => wm.week.startDate === week.startDate && wm.week.endDate === week.endDate);
+          const audits = weekMetric && weekMetric.agentMetrics[agentName] ? weekMetric.agentMetrics[agentName] : null;
+
+          if (weekData && (weekData.tickets > 0 || weekData.firstResponse > 0 || weekData.resolutionTime > 0)) {
+            agentTickets += weekData.tickets || 0;
+            agentBad += weekData.ticketsBad || 0;
+            agentGood += weekData.ticketsGood || 0;
+            agentFirstResp += weekData.firstResponse || 0;
+            agentResol += weekData.resolutionTime || 0;
+            agentWeekCount++;
+            if (weekData.ticketsPerHour > 0) {
+              agentTphSum += weekData.ticketsPerHour;
+              agentTphCount++;
+            }
+          }
+          if (audits && audits.tickets > 0) {
+            agentQualitySum += Math.round(audits.totalScore / audits.tickets);
+            agentQualityCount++;
+          }
+        });
+
+        if (agentWeekCount > 0) {
+          monthlyAvg.tickets += agentTickets;
+          monthlyAvg.ticketsBad += agentBad;
+          monthlyAvg.ticketsGood += agentGood;
+          monthlyAvg.firstResponse += agentFirstResp;
+          monthlyAvg.resolutionTime += agentResol;
+          monthlyAvg.weekCount += agentWeekCount;
+          if (agentTphCount > 0) {
+            monthlyAvg.ticketsPerHour += agentTphSum;
+            monthlyAvg.ticketsPerHourCount += agentTphCount;
+          }
+          monthlyAvg.agentCount++;
+        }
+        if (agentQualityCount > 0) {
+          monthlyAvg.quality += agentQualitySum;
+          monthlyAvg.qualityCount += agentQualityCount;
+        }
+      });
+
+      tableHTML += `
+        <tr style="background: rgba(56, 206, 166, 0.15); font-weight: 700; border-top: 2px solid #38CEA6;">
+          <td colspan="2" style="text-align: center;">📊 PROMEDIO</td>
+      `;
+
+      weeks.forEach((week, weekIndex) => {
+        const agentCountForWeek = avgRow.agentCount[weekIndex] || 0;
+        const totalTickets = avgRow.tickets[weekIndex] || 0;
+        const totalBad = avgRow.ticketsBad[weekIndex] || 0;
+        const totalGood = avgRow.ticketsGood[weekIndex] || 0;
+        const avgTph = agentCountForWeek > 0 ? (avgRow.ticketsPerHour[weekIndex] || 0) / agentCountForWeek : 0;
+        const avgFirstResp = agentCountForWeek > 0 ? (avgRow.firstResponse[weekIndex] || 0) / agentCountForWeek : 0;
+        const avgResol = agentCountForWeek > 0 ? (avgRow.resolutionTime[weekIndex] || 0) / agentCountForWeek : 0;
+        const avgFirstRespMin = avgFirstResp > 0 ? (avgFirstResp / 60) : 0;
+        const totalCalifPct = totalTickets > 0 ? ((totalBad + totalGood) / totalTickets * 100) : 0;
+        const avgQuality = (avgRow.qualityCount[weekIndex] || 0) > 0 ? (avgRow.quality[weekIndex] / avgRow.qualityCount[weekIndex]) : 0;
+
+        tableHTML += `
+          <td style="text-align: center;">${totalTickets > 0 ? totalTickets.toFixed(0) : '-'}</td>
+          <td style="text-align: center; color: #8b5cf6;">${avgTph > 0 ? avgTph.toFixed(1) : '-'}</td>
+          <td style="text-align: center;">${totalBad > 0 ? totalBad.toFixed(0) : '-'}</td>
+          <td style="text-align: center;">${totalGood > 0 ? totalGood.toFixed(0) : '-'}</td>
+          <td style="text-align: center;">${avgFirstResp > 0 ? avgFirstResp.toFixed(1) : '-'}</td>
+          <td style="text-align: center;">${avgResol > 0 ? avgResol.toFixed(1) : '-'}</td>
+          <td style="text-align: center; color: #0ea5e9;">${avgFirstRespMin > 0 ? avgFirstRespMin.toFixed(1) : '-'}</td>
+          <td style="text-align: center;">${totalCalifPct > 0 ? totalCalifPct.toFixed(1) + '%' : '-'}</td>
+          <td style="text-align: center; color: #38CEA6;">${avgQuality > 0 ? avgQuality.toFixed(1) + '%' : '-'}</td>
+          ${isEditor ? '<td></td>' : ''}
+        `;
+      });
+
+      const monthlyTotalTickets = monthlyAvg.tickets;
+      const monthlyTotalBad = monthlyAvg.ticketsBad;
+      const monthlyTotalGood = monthlyAvg.ticketsGood;
+      const monthlyAvgTph = monthlyAvg.ticketsPerHourCount > 0 ? (monthlyAvg.ticketsPerHour / monthlyAvg.ticketsPerHourCount) : 0;
+      const monthlyAvgFirstResp = monthlyAvg.weekCount > 0 ? (monthlyAvg.firstResponse / monthlyAvg.weekCount) : 0;
+      const monthlyAvgResol = monthlyAvg.weekCount > 0 ? (monthlyAvg.resolutionTime / monthlyAvg.weekCount) : 0;
+      const monthlyAvgFirstRespMin = monthlyAvgFirstResp > 0 ? (monthlyAvgFirstResp / 60) : 0;
+      const monthlyTotalCalifPct = monthlyTotalTickets > 0 ? ((monthlyTotalBad + monthlyTotalGood) / monthlyTotalTickets * 100) : 0;
+      const monthlyAvgQuality = monthlyAvg.qualityCount > 0 ? (monthlyAvg.quality / monthlyAvg.qualityCount) : 0;
+
+      tableHTML += `
+        <td style="text-align: center; background: #f0fdf4;">${monthlyTotalTickets > 0 ? monthlyTotalTickets.toFixed(0) : '-'}</td>
+        <td style="text-align: center; background: #f0fdf4; color: #8b5cf6;">${monthlyAvgTph > 0 ? monthlyAvgTph.toFixed(1) : '-'}</td>
+        <td style="text-align: center; background: #f0fdf4;">${monthlyTotalBad > 0 ? monthlyTotalBad.toFixed(0) : '-'}</td>
+        <td style="text-align: center; background: #f0fdf4;">${monthlyTotalGood > 0 ? monthlyTotalGood.toFixed(0) : '-'}</td>
+        <td style="text-align: center; background: #f0fdf4;">${monthlyAvgFirstResp > 0 ? monthlyAvgFirstResp.toFixed(1) : '-'}</td>
+        <td style="text-align: center; background: #f0fdf4;">${monthlyAvgResol > 0 ? monthlyAvgResol.toFixed(1) : '-'}</td>
+        <td style="text-align: center; background: #f0fdf4; color: #0ea5e9;">${monthlyAvgFirstRespMin > 0 ? monthlyAvgFirstRespMin.toFixed(1) : '-'}</td>
+        <td style="text-align: center; background: #f0fdf4;">${monthlyTotalCalifPct > 0 ? monthlyTotalCalifPct.toFixed(1) + '%' : '-'}</td>
+        <td style="text-align: center; background: #f0fdf4; color: #38CEA6;">${monthlyAvgQuality > 0 ? monthlyAvgQuality.toFixed(1) + '%' : '-'}</td>
+        ${isEditor ? '<td style="background: #f0fdf4;"></td>' : ''}
+      </tr>
+      `;
+    }
     
     tableHTML += `</tbody></table></div></div>`;
     
@@ -4410,7 +4937,7 @@ const App = {
     if (agentsList.length === 0) return '';
     
     let tableHTML = `
-      <div style="margin-bottom: 2rem; border: 2px solid ${teamColor}; border-radius: 0.75rem; overflow: hidden;">
+      <div style="margin-bottom: 2rem; border: 2px solid ${teamColor}; border-radius: 0.75rem; overflow: visible;">
         <div style="background: ${teamColor}; color: white; padding: 0.75rem 1rem;">
           <h4 style="margin: 0; font-size: 1rem; font-weight: 700;">
             <i class="fas fa-users"></i> ${teamName}
@@ -5276,11 +5803,14 @@ const App = {
       return;
     }
 
-    // Detectar formato "estado/segundos" (ej. export de estado con fecha, nombre, canal, estado, hora inicio/fin y segundos)
+    // Detectar formato export "estado" (ej. con fecha, nombre, canal, estado, hora inicio/fin y posible duración)
     const header = lines[0].toLowerCase();
-    const isStateSecondsFormat = header.includes('estado') && header.includes('segundos') && (header.includes('fecha') || header.includes('hora de inicio'));
-    if (importMode === 'rango' && !isStateSecondsFormat) {
-      alert('Para importar por rango se requiere el formato con columna de fecha por fila (estado/segundos).');
+    const isStateExportFormat =
+      header.includes('nombre del agente') &&
+      header.includes('estado') &&
+      (header.includes('fecha') || header.includes('hora de inicio'));
+    if (importMode === 'rango' && !isStateExportFormat) {
+      alert('Para importar por rango se requiere el formato con columna de fecha por fila (estado).');
       return;
     }
 
@@ -5356,6 +5886,7 @@ const App = {
     let imported = 0;
     const agentData = {};
     const aggregatedSeconds = {}; // { agentName: { dateStr: totalSeconds } }
+    const sumSeenByAgentDate = {}; // { agentName: { isoDate: true } }
     
     // Skip header rows (usually 2-3 rows of headers)
     let dataStartIndex = 0;
@@ -5366,7 +5897,7 @@ const App = {
       }
     }
     
-    // Para formato estado/segundos NO forzamos el modo: si el usuario eligió rango, se respeta.
+    // Para formato export estado NO forzamos el modo: si el usuario eligió rango, se respeta.
 
     // Process data lines
     for (let i = dataStartIndex; i < lines.length; i++) {
@@ -5380,7 +5911,7 @@ const App = {
       let agentName = '';
       let dateFromRow = '';
 
-      if (isStateSecondsFormat) {
+      if (isStateExportFormat) {
         // columns: 0 fecha, 1 nombre, ... last = segundos
         dateFromRow = values[0].trim();
         agentName = values[1]
@@ -5403,7 +5934,7 @@ const App = {
       const isTeamMember = teamMemberNames.includes(agentName);
       
       // Skip rows that look like headers or summaries
-      if (!isStateSecondsFormat && (agentName.toLowerCase().includes('semana') || 
+      if (!isStateExportFormat && (agentName.toLowerCase().includes('semana') || 
           agentName.toLowerCase().includes('nombre') ||
           agentName.toLowerCase().includes('total'))) {
         continue;
@@ -5422,15 +5953,11 @@ const App = {
         }
       }
 
-      if (isStateSecondsFormat) {
-        const secondsCol = values[values.length - 1] || '';
-        const seconds = parseInt(secondsCol, 10);
-        if (isNaN(seconds) || seconds <= 0) continue;
-
+      if (isStateExportFormat) {
         const estadoValue = (values[3] || '').toUpperCase();
-        const isSumRow = estadoValue === 'SUM' || (values[4] || '').toUpperCase() === 'SUM' || (values[5] || '').toUpperCase() === 'SUM';
+        const isSumRow = estadoValue === 'SUM' || values.some(v => String(v || '').trim().toUpperCase() === 'SUM');
 
-        // Parse date like "29 Dec 25" or similar (soportar meses en inglés/español abreviado)
+        // Parse date like "29 Dec 25" or similar (meses en inglés; se mantiene tolerancia)
         const dateStr = dateFromRow;
         const monthMap = {
           'jan':0,'ene':0,
@@ -5474,16 +6001,55 @@ const App = {
           if (!weekDateSet.has(isoDate)) continue;
         }
 
+        const findNumericDurationSeconds = (arr) => {
+          // Busca el mayor número entero en la fila (común en exportes donde SUM deja duración en una columna)
+          let best = null;
+          arr.forEach(v => {
+            const n = parseInt(String(v || '').replace(/,/g, '').trim(), 10);
+            if (!isNaN(n) && n > 0) {
+              if (best === null || n > best) best = n;
+            }
+          });
+          return best;
+        };
+
+        const calcDurationSecondsFromTimes = (startStr, endStr) => {
+          const s = String(startStr || '').trim();
+          const e = String(endStr || '').trim();
+          if (!/^\d{1,2}:\d{2}:\d{2}$/.test(s) || !/^\d{1,2}:\d{2}:\d{2}$/.test(e)) return 0;
+          const toSec = (hms) => {
+            const [hh, mm, ss] = hms.split(':').map(x => parseInt(x, 10) || 0);
+            return hh * 3600 + mm * 60 + ss;
+          };
+          let ds = toSec(e) - toSec(s);
+          if (ds < 0) ds += 24 * 3600; // cruce de medianoche
+          return ds;
+        };
+
+        // 1) Preferir duración numérica si existe (especialmente en filas SUM)
+        let seconds = findNumericDurationSeconds(values);
+
+        // 2) Si no hay segundos numéricos, calcular desde hora inicio/fin (filas normales)
+        if (!seconds || seconds <= 0) {
+          const startTime = values[4];
+          const endTime = values[5];
+          seconds = calcDurationSecondsFromTimes(startTime, endTime);
+        }
+
+        if (!seconds || seconds <= 0) continue;
+
         if (!aggregatedSeconds[agentName]) aggregatedSeconds[agentName] = {};
+        if (!sumSeenByAgentDate[agentName]) sumSeenByAgentDate[agentName] = {};
         if (isSumRow) {
-          // Usar el total directo y no sumar más filas
+          // Usar el total directo del día si viene en SUM (o lo calculamos si el export lo permite)
           aggregatedSeconds[agentName][isoDate] = seconds;
+          sumSeenByAgentDate[agentName][isoDate] = true;
         } else {
-          if (aggregatedSeconds[agentName][isoDate] && typeof aggregatedSeconds[agentName][isoDate] === 'number') {
-            aggregatedSeconds[agentName][isoDate] += seconds;
-          } else {
-            aggregatedSeconds[agentName][isoDate] = seconds;
+          // Si existe SUM para el día, no seguir acumulando
+          if (sumSeenByAgentDate[agentName][isoDate]) {
+            continue;
           }
+          aggregatedSeconds[agentName][isoDate] = (aggregatedSeconds[agentName][isoDate] || 0) + seconds;
         }
         continue;
       }
@@ -5544,8 +6110,8 @@ const App = {
       }
     }
 
-    // Save acumulado desde formato estado/segundos (guardado por día)
-    if (isStateSecondsFormat) {
+    // Save acumulado desde formato export estado (guardado por día)
+    if (isStateExportFormat) {
       Object.entries(aggregatedSeconds).forEach(([agentName, dates]) => {
         Object.entries(dates).forEach(([isoDate, totalSeconds]) => {
           const hours = this.secondsToHMS(totalSeconds);
@@ -5739,10 +6305,7 @@ const App = {
     // Helper to format seconds to H:MM:SS
     const formatTimeHMS = (seconds) => {
       if (!seconds || seconds <= 0) return '-';
-      const hours = Math.floor(seconds / 3600);
-      const minutes = Math.floor((seconds % 3600) / 60);
-      const secs = seconds % 60;
-      return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      return this.formatSignedHMS(seconds);
     };
 
     // Helper to get dates for a week (Monday to Sunday)
@@ -5769,8 +6332,9 @@ const App = {
       const endDay = week.endDate.split('-')[2];
       const endMonth = week.endDate.split('-')[1];
       
+
       let tableHTML = `
-        <div style="margin-bottom: 2rem; border: 1px solid #e5e7eb; border-radius: 0.75rem; overflow: hidden;">
+        <div style="margin-bottom: 2rem; border: 1px solid #e5e7eb; border-radius: 0.75rem; overflow: visible;">
           <div style="background: linear-gradient(135deg, #272883, #1e1f6a); color: white; padding: 0.75rem 1rem; display: flex; justify-content: space-between; align-items: center;">
             <h4 style="margin: 0; font-size: 1rem; font-weight: 700;">
               <i class="fas fa-calendar-week"></i> Semana ${startDay}/${startMonth} al ${endDay}/${endMonth}
@@ -5798,7 +6362,7 @@ const App = {
       
       // Add summary headers (se elimina columna Evidencias)
       tableHTML += `
-                  <th style="text-align: center; background: rgba(56, 206, 166, 0.1); min-width: 60px;">Días Trabajados</th>
+                  <th style="text-align: center; background: rgba(56, 206, 166, 0.1); min-width: 80px;">Días Rotación</th>
                   <th style="text-align: center; background: rgba(56, 206, 166, 0.1); min-width: 90px;">Horas Proyectadas</th>
                   <th style="text-align: center; background: rgba(56, 206, 166, 0.1); min-width: 90px;">Horas Realizadas</th>
                   <th style="text-align: center; background: rgba(239, 68, 68, 0.1); min-width: 80px;">Horas Pendientes</th>
@@ -5813,12 +6377,15 @@ const App = {
         const agentShift = this.getAgentShift(agentName, teams);
         const expectedDailyHours = DataManager.getExpectedDailyHours(agentShift);
         const expectedDailySeconds = expectedDailyHours * 3600;
+
+        const rotationDays = this.getAgentRotationDays(agentName, teams);
         
         const weekData = connectionData[agentName] && connectionData[agentName][weekIndex];
         const daysData = weekData && weekData.days ? weekData.days : {};
+        const hasSavedWeekData = !!(weekData && weekData.days && Object.keys(weekData.days).length > 0);
         
-        let daysWorked = 0;
-        let totalSeconds = 0;
+        let requiredDays = 0;
+        let ownWorkedSeconds = 0;
         
         // Selector de día por agente (compacto bajo el nombre)
         const sanitizedAgent = agentName.replace(/[^A-Za-z0-9_-]/g, '');
@@ -5831,12 +6398,12 @@ const App = {
           return `<option value="${iso}">${label}</option>`;
         }).join('');
         const agentControls = isEditor ? `
-          <div style="margin-top: 4px; font-size: 0.8rem; opacity: 0.8; display: flex; gap: 6px; align-items: center;">
-            <select id="daySel-${weekIndex}-${sanitizedAgent}" class="input-dark" style="font-size: 0.75rem; padding: 2px 4px;">
+          <div style="margin-top: 4px; font-size: 0.8rem; opacity: 0.9; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <select id="daySel-${weekIndex}-${sanitizedAgent}" class="input-dark" style="font-size: 0.75rem; padding: 2px 4px; max-width: 70px;">
               ${dayOptions}
             </select>
-            <span title="Marcar Libre" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'libre')">😴</span>
-            <span title="Marcar Guardia" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'guardia')">🛡️</span>
+            <button type="button" class="btn-mini" style="padding: 2px 6px; background: rgba(39, 40, 131, 0.1); border: 1px solid rgba(39, 40, 131, 0.25);" onclick="App.openConnectionStatusModal('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value)">Acción</button>
+            <span title="Borrar Estado" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'clear')">🗑️</span>
           </div>
         ` : '';
 
@@ -5852,9 +6419,16 @@ const App = {
           
           let cellContent = '';
           let cellStyle = 'text-align: center;';
-          const isWeekendShift = ['Fin de Semana AM', 'Fin de Semana PM', 'Madrugada Fin de Semana'].includes(agentShift);
           const dow = date.getDay(); // 0=Domingo ... 6=Sábado
+          const isInRotation = rotationDays.includes(dow);
+          // Cambio de guardia ahora es manual: no se transfiere/acredita a otros
           
+          if (!hasSavedWeekData && !dayData) {
+            // Semana sin datos guardados: dejar celdas vacías
+            tableHTML += `<td style="text-align: center; color: #9ca3af;">-</td>`;
+            return;
+          }
+
           if (dayData) {
             const status = dayData.status || 'worked';
             const hours = dayData.hours || '';
@@ -5864,20 +6438,25 @@ const App = {
             } else if (status === 'vacaciones' || hours === 'VACACIONES') {
               cellContent = '<span style="color: #f59e0b; font-weight: 600;">VACACIONES</span>';
               cellStyle += ' background: rgba(245, 158, 11, 0.1);';
-            } else if (status === 'cambio' || hours === 'CAMBIO') {
-              cellContent = '<span style="color: #8b5cf6; font-weight: 600;">CAMBIO</span>';
+            } else if (status === 'cambio') {
+              const seconds = DataManager.parseTimeToSeconds(hours);
+              if (seconds > 0) {
+                ownWorkedSeconds += seconds;
+                cellContent = `<span style="color: #8b5cf6; font-weight: 700;">${hours}</span><div style="font-size: 0.7rem; color: #8b5cf6; font-weight: 600;">CAMBIO</div>`;
+              } else {
+                cellContent = `<span style="color: #8b5cf6; font-weight: 600;">CAMBIO</span>`;
+              }
               cellStyle += ' background: rgba(139, 92, 246, 0.1);';
-            } else if (status === 'guardia' || hours === 'GUARDIA') {
-              cellContent = '<span style="color: #06b6d4; font-weight: 600;">GUARDIA</span>';
+            } else if (status === 'guardia' || status === 'vacante' || hours === 'GUARDIA' || hours === 'VACANTE') {
+              cellContent = '<span style="color: #06b6d4; font-weight: 600;">VACANTE</span>';
               cellStyle += ' background: rgba(6, 182, 212, 0.1);';
             } else if (hours) {
               // Parse hours and add to total
               const seconds = DataManager.parseTimeToSeconds(hours);
               if (seconds > 0) {
-                daysWorked++;
-                totalSeconds += seconds;
-                
-                // Color code based on expected hours
+                ownWorkedSeconds += seconds;
+              }
+              if (seconds > 0) {
                 if (seconds >= expectedDailySeconds) {
                   cellStyle += ' color: #10b981; font-weight: 600;';
                 } else if (seconds >= expectedDailySeconds * 0.9) {
@@ -5888,40 +6467,67 @@ const App = {
               }
               cellContent = hours;
             }
+
+            // Si hay un registro pero no hay contenido (sin horas/estado reconocido), aplicar reglas de rotación
+            if (!cellContent) {
+              if (!isInRotation) {
+                cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
+              } else {
+                const vis = isEditor ? 'visible' : 'hidden';
+                cellContent = `<span style="color: #ef4444; font-weight: 700; visibility: ${vis};">-${this.formatSignedHMS(expectedDailySeconds)}</span>`;
+                cellStyle += ' background: rgba(239, 68, 68, 0.08);';
+              }
+            }
           } else {
-            // Mostrar Libre de lunes a viernes para turnos de fin de semana
-            if (isWeekendShift && dow >= 1 && dow <= 5) {
+            // Cuando ya existe data en la semana, aplican reglas de rotación
+            if (!isInRotation) {
               cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
             } else {
-              cellContent = '<span style="color: #d1d5db;">-</span>';
+              // FALTA: día obligatorio sin conexión
+              const vis = isEditor ? 'visible' : 'hidden';
+              cellContent = `<span style="color: #ef4444; font-weight: 700; visibility: ${vis};">-${this.formatSignedHMS(expectedDailySeconds)}</span>`;
+              cellStyle += ' background: rgba(239, 68, 68, 0.08);';
+            }
+          }
+
+          // Conteo de días obligatorios (rotación) considerando justificaciones
+          if (isInRotation) {
+            const status = dayData?.status;
+            // Descanso/Vacaciones/Vacante/Cambio justifican y sacan el día del esperado
+            if (status !== 'libre' && status !== 'vacaciones' && status !== 'vacante' && status !== 'guardia') {
+              requiredDays += 1;
             }
           }
           
           tableHTML += `<td style="${cellStyle}">${cellContent}</td>`;
         });
         
-        // Calculate expected hours based on days worked
-        const expectedSeconds = daysWorked * expectedDailySeconds;
-        const expectedFormatted = formatTimeHMS(expectedSeconds);
-        const actualFormatted = formatTimeHMS(totalSeconds);
+        // Horas esperadas basadas en rotación (no en conexión detectada)
+        const expectedSeconds = requiredDays * expectedDailySeconds;
+        const actualSeconds = ownWorkedSeconds;
+        const expectedFormatted = hasSavedWeekData ? formatTimeHMS(expectedSeconds) : '-';
+        const actualFormatted = hasSavedWeekData ? formatTimeHMS(actualSeconds) : '-';
         
         // Calculate pending and extra hours
-        const diff = totalSeconds - expectedSeconds;
+        const diff = actualSeconds - expectedSeconds;
         let pendingFormatted = '-';
         let extraFormatted = '-';
         
-        if (diff < 0) {
+        if (!hasSavedWeekData) {
+          pendingFormatted = '-';
+          extraFormatted = '-';
+        } else if (diff < 0) {
           pendingFormatted = `<span style="color: #ef4444; font-weight: 600;">${formatTimeHMS(Math.abs(diff))}</span>`;
         } else if (diff > 0) {
           extraFormatted = `<span style="color: #10b981; font-weight: 600;">${formatTimeHMS(diff)}</span>`;
-        } else if (daysWorked > 0) {
+        } else if (requiredDays > 0) {
           pendingFormatted = '0:00:00';
           extraFormatted = '0:00:00';
         }
         
         // Add summary cells (sin columna Evidencias)
         tableHTML += `
-          <td style="text-align: center; background: rgba(56, 206, 166, 0.05); font-weight: 600;">${daysWorked}</td>
+          <td style="text-align: center; background: rgba(56, 206, 166, 0.05); font-weight: 700;">${hasSavedWeekData ? requiredDays : '-'}</td>
           <td style="text-align: center; background: rgba(56, 206, 166, 0.05);">${expectedFormatted}</td>
           <td style="text-align: center; background: rgba(56, 206, 166, 0.05); font-weight: 600;">${actualFormatted}</td>
           <td style="text-align: center; background: rgba(239, 68, 68, 0.05);">${pendingFormatted}</td>
@@ -5956,10 +6562,7 @@ const App = {
     // Helper to format seconds to H:MM:SS
     const formatTimeHMS = (seconds) => {
       if (!seconds || seconds <= 0) return '-';
-      const hours = Math.floor(seconds / 3600);
-      const minutes = Math.floor((seconds % 3600) / 60);
-      const secs = seconds % 60;
-      return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      return this.formatSignedHMS(seconds);
     };
 
     // Helper to get dates for a week
@@ -5977,7 +6580,7 @@ const App = {
     };
     
     let teamHTML = `
-      <div style="margin-bottom: 2rem; border: 2px solid ${teamColor}; border-radius: 0.75rem; overflow: hidden;">
+      <div style="margin-bottom: 2rem; border: 2px solid ${teamColor}; border-radius: 0.75rem; overflow: visible;">
         <div style="background: ${teamColor}; color: white; padding: 0.75rem 1rem;">
           <h4 style="margin: 0; font-size: 1rem; font-weight: 700;">
             <i class="fas fa-users"></i> ${teamName}
@@ -5988,13 +6591,14 @@ const App = {
     // Build HTML for each week
     weeks.forEach((week, weekIndex) => {
       const weekDates = getWeekDates(week.startDate, week.endDate);
+
       const startDay = week.startDate.split('-')[2];
       const startMonth = week.startDate.split('-')[1];
       const endDay = week.endDate.split('-')[2];
       const endMonth = week.endDate.split('-')[1];
       
       teamHTML += `
-        <div style="margin: 1rem; border: 1px solid #e5e7eb; border-radius: 0.75rem; overflow: hidden;">
+        <div style="margin: 1rem; border: 1px solid #e5e7eb; border-radius: 0.75rem; overflow: visible;">
           <div style="background: linear-gradient(135deg, #272883, #1e1f6a); color: white; padding: 0.5rem 0.75rem; display: flex; justify-content: space-between; align-items: center;">
             <h5 style="margin: 0; font-size: 0.9rem; font-weight: 600;">
               <i class="fas fa-calendar-week"></i> Semana ${startDay}/${startMonth} al ${endDay}/${endMonth}
@@ -6018,7 +6622,7 @@ const App = {
       
       // Add summary headers
       teamHTML += `
-                  <th style="text-align: center; background: rgba(56, 206, 166, 0.1); min-width: 60px;">Días Trabajados</th>
+                  <th style="text-align: center; background: rgba(56, 206, 166, 0.1); min-width: 80px;">Días Rotación</th>
                   <th style="text-align: center; background: rgba(56, 206, 166, 0.1); min-width: 90px;">Horas Proyectadas</th>
                   <th style="text-align: center; background: rgba(56, 206, 166, 0.1); min-width: 90px;">Horas Realizadas</th>
                   <th style="text-align: center; background: rgba(239, 68, 68, 0.1); min-width: 80px;">Horas Pendientes</th>
@@ -6033,14 +6637,37 @@ const App = {
         const agentShift = this.getAgentShift(agentName, teams);
         const expectedDailyHours = DataManager.getExpectedDailyHours(agentShift);
         const expectedDailySeconds = expectedDailyHours * 3600;
+
+        const rotationDays = this.getAgentRotationDays(agentName, teams);
         
         const weekData = connectionData[agentName] && connectionData[agentName][weekIndex];
         const daysData = weekData && weekData.days ? weekData.days : {};
+        const hasSavedWeekData = !!(weekData && weekData.days && Object.keys(weekData.days).length > 0);
         
-        let daysWorked = 0;
-        let totalSeconds = 0;
+        let requiredDays = 0;
+        let ownWorkedSeconds = 0;
         
-        teamHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong></td>`;
+        // Control buttons for editors
+        const sanitizedAgent = agentName.replace(/[^A-Za-z0-9_-]/g, '');
+        const dayOptions = weekDates.map(date => {
+          const yyyy = date.getFullYear();
+          const mm = String(date.getMonth() + 1).padStart(2, '0');
+          const dd = String(date.getDate()).padStart(2, '0');
+          const iso = `${yyyy}-${mm}-${dd}`;
+          const label = `${dd}/${mm}`;
+          return `<option value="${iso}">${label}</option>`;
+        }).join('');
+        const agentControls = isEditor ? `
+          <div style="margin-top: 4px; font-size: 0.8rem; opacity: 0.9; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <select id="daySelTeam-${weekIndex}-${sanitizedAgent}" class="input-dark" style="font-size: 0.75rem; padding: 2px 4px; max-width: 70px;">
+              ${dayOptions}
+            </select>
+            <button type="button" class="btn-mini" style="padding: 2px 6px; background: rgba(39, 40, 131, 0.1); border: 1px solid rgba(39, 40, 131, 0.25);" onclick="App.openConnectionStatusModal('${agentName}', document.getElementById('daySelTeam-${weekIndex}-${sanitizedAgent}').value)">Acción</button>
+            <span title="Borrar Estado" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySelTeam-${weekIndex}-${sanitizedAgent}').value, 'clear')">🗑️</span>
+          </div>
+        ` : '';
+        
+        teamHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong>${agentControls}</td>`;
         
         // Add cell for each day
         weekDates.forEach(date => {
@@ -6052,9 +6679,14 @@ const App = {
           
           let cellContent = '';
           let cellStyle = 'text-align: center;';
-          const isWeekendShift = ['Fin de Semana AM', 'Fin de Semana PM', 'Madrugada Fin de Semana'].includes(agentShift);
           const dow = date.getDay();
+          const isInRotation = rotationDays.includes(dow);
           
+          if (!hasSavedWeekData && !dayData) {
+            teamHTML += `<td style="text-align: center; color: #9ca3af;">-</td>`;
+            return;
+          }
+
           if (dayData) {
             const status = dayData.status || 'worked';
             const hours = dayData.hours || '';
@@ -6064,18 +6696,24 @@ const App = {
             } else if (status === 'vacaciones' || hours === 'VACACIONES') {
               cellContent = '<span style="color: #f59e0b; font-weight: 600;">VACACIONES</span>';
               cellStyle += ' background: rgba(245, 158, 11, 0.1);';
-            } else if (status === 'cambio' || hours === 'CAMBIO') {
-              cellContent = '<span style="color: #8b5cf6; font-weight: 600;">CAMBIO</span>';
+            } else if (status === 'cambio') {
+              const seconds = DataManager.parseTimeToSeconds(hours);
+              if (seconds > 0) {
+                ownWorkedSeconds += seconds;
+                cellContent = `<span style="color: #8b5cf6; font-weight: 700;">${hours}</span><div style="font-size: 0.7rem; color: #8b5cf6; font-weight: 600;">CAMBIO</div>`;
+              } else {
+                cellContent = `<span style="color: #8b5cf6; font-weight: 600;">CAMBIO</span>`;
+              }
               cellStyle += ' background: rgba(139, 92, 246, 0.1);';
-            } else if (status === 'guardia' || hours === 'GUARDIA') {
-              cellContent = '<span style="color: #06b6d4; font-weight: 600;">GUARDIA</span>';
+            } else if (status === 'guardia' || status === 'vacante' || hours === 'GUARDIA' || hours === 'VACANTE') {
+              cellContent = '<span style="color: #06b6d4; font-weight: 600;">VACANTE</span>';
               cellStyle += ' background: rgba(6, 182, 212, 0.1);';
             } else if (hours) {
               const seconds = DataManager.parseTimeToSeconds(hours);
               if (seconds > 0) {
-                daysWorked++;
-                totalSeconds += seconds;
-                
+                ownWorkedSeconds += seconds;
+              }
+              if (seconds > 0) {
                 if (seconds >= expectedDailySeconds) {
                   cellStyle += ' color: #10b981; font-weight: 600;';
                 } else if (seconds >= expectedDailySeconds * 0.9) {
@@ -6086,38 +6724,61 @@ const App = {
               }
               cellContent = hours;
             }
+
+            if (!cellContent) {
+              if (!isInRotation) {
+                cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
+              } else {
+                const vis = isEditor ? 'visible' : 'hidden';
+                cellContent = `<span style="color: #ef4444; font-weight: 700; visibility: ${vis};">-${this.formatSignedHMS(expectedDailySeconds)}</span>`;
+                cellStyle += ' background: rgba(239, 68, 68, 0.08);';
+              }
+            }
           } else {
-            if (isWeekendShift && dow >= 1 && dow <= 5) {
+            if (!isInRotation) {
               cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
             } else {
-              cellContent = '<span style="color: #d1d5db;">-</span>';
+              const vis = isEditor ? 'visible' : 'hidden';
+              cellContent = `<span style="color: #ef4444; font-weight: 700; visibility: ${vis};">-${this.formatSignedHMS(expectedDailySeconds)}</span>`;
+              cellStyle += ' background: rgba(239, 68, 68, 0.08);';
+            }
+          }
+
+          // Conteo de días obligatorios según rotación
+          if (isInRotation) {
+            const status = dayData?.status;
+            if (status !== 'libre' && status !== 'vacaciones' && status !== 'vacante' && status !== 'guardia') {
+              requiredDays += 1;
             }
           }
           
           teamHTML += `<td style="${cellStyle}">${cellContent}</td>`;
         });
         
-        // Calculate expected hours based on days worked
-        const expectedSeconds = daysWorked * expectedDailySeconds;
-        const expectedFormatted = formatTimeHMS(expectedSeconds);
-        const actualFormatted = formatTimeHMS(totalSeconds);
+        const expectedSeconds = requiredDays * expectedDailySeconds;
+        const actualSeconds = ownWorkedSeconds;
+        const expectedFormatted = hasSavedWeekData ? formatTimeHMS(expectedSeconds) : '-';
+        const actualFormatted = hasSavedWeekData ? formatTimeHMS(actualSeconds) : '-';
         
         // Calculate pending and extra hours
-        const diff = totalSeconds - expectedSeconds;
+        const diff = actualSeconds - expectedSeconds;
         let pendingFormatted = '-';
         let extraFormatted = '-';
         
-        if (diff < 0) {
+        if (!hasSavedWeekData) {
+          pendingFormatted = '-';
+          extraFormatted = '-';
+        } else if (diff < 0) {
           pendingFormatted = `<span style="color: #ef4444; font-weight: 600;">${formatTimeHMS(Math.abs(diff))}</span>`;
         } else if (diff > 0) {
           extraFormatted = `<span style="color: #10b981; font-weight: 600;">${formatTimeHMS(diff)}</span>`;
-        } else if (daysWorked > 0) {
+        } else if (requiredDays > 0) {
           pendingFormatted = '0:00:00';
           extraFormatted = '0:00:00';
         }
         
         teamHTML += `
-          <td style="text-align: center; background: rgba(56, 206, 166, 0.05); font-weight: 600;">${daysWorked}</td>
+          <td style="text-align: center; background: rgba(56, 206, 166, 0.05); font-weight: 700;">${hasSavedWeekData ? requiredDays : '-'}</td>
           <td style="text-align: center; background: rgba(56, 206, 166, 0.05);">${expectedFormatted}</td>
           <td style="text-align: center; background: rgba(56, 206, 166, 0.05); font-weight: 600;">${actualFormatted}</td>
           <td style="text-align: center; background: rgba(239, 68, 68, 0.05);">${pendingFormatted}</td>
@@ -6159,6 +6820,463 @@ const App = {
         reason: reason
       });
     }
+  },
+
+  // Statistics Section Functions
+  initializeStatisticsFilters() {
+    const teams = DataManager.getAllTeams();
+    const userTeam = DataManager.getUserTeam();
+    const isEditor = DataManager.isEditor();
+    const hasSupervisorPerms = DataManager.hasSupervisorPermissions();
+
+    // Populate team filter
+    const filterTeamStats = document.getElementById('filterTeamStats');
+    if (filterTeamStats) {
+      // Clear existing options except the first one
+      while (filterTeamStats.options.length > 1) {
+        filterTeamStats.remove(1);
+      }
+
+      Object.values(teams).forEach(team => {
+        const option = document.createElement('option');
+        option.value = team.id;
+        option.textContent = team.name;
+        filterTeamStats.appendChild(option);
+      });
+
+      // For non-editor users, restrict to their team
+      if (!isEditor && !hasSupervisorPerms && userTeam) {
+        filterTeamStats.value = userTeam;
+        filterTeamStats.disabled = true;
+      } else if (hasSupervisorPerms && userTeam) {
+        filterTeamStats.value = userTeam;
+        filterTeamStats.disabled = false;
+      } else {
+        filterTeamStats.disabled = false;
+      }
+    }
+
+    // Initialize agent filter with empty state
+    this.updateAgentStatsFilter();
+  },
+
+  // Update agent filter based on selected team
+  updateAgentStatsFilter() {
+    const filterTeamStats = document.getElementById('filterTeamStats');
+    const filterAgentStats = document.getElementById('filterAgentStats');
+    const selectedTeam = filterTeamStats ? filterTeamStats.value : '';
+
+    if (!filterAgentStats) return;
+
+    // Clear existing options except the first one
+    while (filterAgentStats.options.length > 1) {
+      filterAgentStats.remove(1);
+    }
+
+    const teams = DataManager.getAllTeams();
+    let agents = [];
+
+    if (selectedTeam && teams[selectedTeam] && teams[selectedTeam].members) {
+      // Get agents from the selected team
+      agents = teams[selectedTeam].members.map(m => m.name).sort();
+    } else {
+      // Get all agents from all teams
+      Object.values(teams).forEach(team => {
+        if (team.members) {
+          team.members.forEach(m => {
+            if (!agents.includes(m.name)) {
+              agents.push(m.name);
+            }
+          });
+        }
+      });
+      agents.sort();
+    }
+
+    agents.forEach(agentName => {
+      const option = document.createElement('option');
+      option.value = agentName;
+      option.textContent = agentName;
+      filterAgentStats.appendChild(option);
+    });
+  },
+
+  loadStatistics() {
+    const filterMonthStats = document.getElementById('filterMonthStats');
+    const selectedMonth = filterMonthStats ? filterMonthStats.value : '';
+
+    if (!selectedMonth) {
+      const container = document.getElementById('statisticsContainer');
+      container.innerHTML = `
+        <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+          <i class="fas fa-chart-pie" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+          <p>Seleccione un mes para ver las estadísticas de auditorías</p>
+        </div>
+      `;
+      return;
+    }
+
+    const parsed = this.parseSelectedMonthValue(selectedMonth);
+    const monthIndex = parsed.monthIndex;
+    const year = parsed.yearOverride ?? this.getEffectiveYearForMonth(monthIndex);
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const monthName = monthNames[monthIndex];
+
+    const filterTeamStats = document.getElementById('filterTeamStats');
+    const selectedTeam = filterTeamStats ? filterTeamStats.value : '';
+    
+    const filterAgentStats = document.getElementById('filterAgentStats');
+    const selectedAgent = filterAgentStats ? filterAgentStats.value : '';
+
+    let stats;
+    let teamName = 'Todos los Equipos';
+    let displayName = '';
+    const teams = DataManager.getAllTeams();
+
+    // Get audits based on filters
+    let audits;
+    if (selectedTeam) {
+      audits = DataManager.getAuditsForStatistics(year, monthIndex, selectedTeam);
+      teamName = teams[selectedTeam] ? teams[selectedTeam].name : selectedTeam;
+    } else {
+      audits = DataManager.getAuditsForStatistics(year, monthIndex, null);
+    }
+
+    // Filter by specific agent if selected
+    if (selectedAgent) {
+      audits = audits.filter(a => a.agentName === selectedAgent);
+      displayName = `${selectedAgent} - ${teamName}`;
+    } else {
+      displayName = teamName;
+    }
+
+    stats = DataManager.calculateAuditStatistics(audits);
+
+    this.renderStatistics(stats, monthName, year, displayName, selectedTeam, selectedAgent);
+  },
+
+  renderStatistics(stats, monthName, year, teamName, teamId, selectedAgent) {
+    const container = document.getElementById('statisticsContainer');
+    const teams = DataManager.getAllTeams();
+
+    if (!stats || stats.totalAudits === 0) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+          <i class="fas fa-inbox" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+          <p>No hay auditorías registradas para ${monthName} ${year} en ${teamName}</p>
+        </div>
+      `;
+      return;
+    }
+
+    // Build the statistics HTML
+    let html = `
+      <div style="margin-bottom: 1.5rem;">
+        <h3 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem 0; color: var(--text-primary);">
+          <i class="fas fa-chart-pie"></i> Estadísticas - ${monthName} ${year} - ${teamName}
+        </h3>
+      </div>
+
+      <!-- Summary Cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <div style="background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; padding: 1.25rem; border-radius: 0.75rem;">
+          <div style="font-size: 0.85rem; opacity: 0.9;">Total Auditorías</div>
+          <div style="font-size: 2rem; font-weight: 700;">${stats.totalAudits}</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #272883, #1e1f6a); color: white; padding: 1.25rem; border-radius: 0.75rem;">
+          <div style="font-size: 0.85rem; opacity: 0.9;">Promedio de Calidad</div>
+          <div style="font-size: 2rem; font-weight: 700;">${stats.averageScore}%</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; padding: 1.25rem; border-radius: 0.75rem;">
+          <div style="font-size: 0.85rem; opacity: 0.9;">Auditorías c/Fallo Empatía</div>
+          <div style="font-size: 2rem; font-weight: 700;">${stats.pillarDeficiencies.empatia}</div>
+          <div style="font-size: 0.75rem; opacity: 0.8;">${Math.round((stats.pillarDeficiencies.empatia / stats.totalAudits) * 100)}% del total</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #ef4444, #b91c1c); color: white; padding: 1.25rem; border-radius: 0.75rem;">
+          <div style="font-size: 0.85rem; opacity: 0.9;">Auditorías c/Fallo Gestión</div>
+          <div style="font-size: 2rem; font-weight: 700;">${stats.pillarDeficiencies.gestion}</div>
+          <div style="font-size: 0.75rem; opacity: 0.8;">${Math.round((stats.pillarDeficiencies.gestion / stats.totalAudits) * 100)}% del total</div>
+        </div>
+      </div>
+
+      <!-- Score Distribution -->
+      <div style="background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: var(--text-primary);">
+          <i class="fas fa-chart-bar" style="color: #38CEA6;"></i> Distribución de Puntajes
+        </h4>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem;">
+          <div style="text-align: center; padding: 0.75rem; background: #dcfce7; border-radius: 0.5rem;">
+            <div style="font-size: 1.5rem; font-weight: 700; color: #16a34a;">${stats.scoreDistribution.excellent}</div>
+            <div style="font-size: 0.8rem; color: #166534;">Excelente (95%+)</div>
+            <div style="font-size: 0.75rem; color: #6b7280;">${Math.round((stats.scoreDistribution.excellent / stats.totalAudits) * 100)}%</div>
+          </div>
+          <div style="text-align: center; padding: 0.75rem; background: #dbeafe; border-radius: 0.5rem;">
+            <div style="font-size: 1.5rem; font-weight: 700; color: #2563eb;">${stats.scoreDistribution.good}</div>
+            <div style="font-size: 0.8rem; color: #1e40af;">Bueno (80-94%)</div>
+            <div style="font-size: 0.75rem; color: #6b7280;">${Math.round((stats.scoreDistribution.good / stats.totalAudits) * 100)}%</div>
+          </div>
+          <div style="text-align: center; padding: 0.75rem; background: #fef3c7; border-radius: 0.5rem;">
+            <div style="font-size: 1.5rem; font-weight: 700; color: #d97706;">${stats.scoreDistribution.regular}</div>
+            <div style="font-size: 0.8rem; color: #92400e;">Regular (60-79%)</div>
+            <div style="font-size: 0.75rem; color: #6b7280;">${Math.round((stats.scoreDistribution.regular / stats.totalAudits) * 100)}%</div>
+          </div>
+          <div style="text-align: center; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">
+            <div style="font-size: 1.5rem; font-weight: 700; color: #dc2626;">${stats.scoreDistribution.poor}</div>
+            <div style="font-size: 0.8rem; color: #991b1b;">Deficiente (<60%)</div>
+            <div style="font-size: 0.75rem; color: #6b7280;">${Math.round((stats.scoreDistribution.poor / stats.totalAudits) * 100)}%</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top Deficient Criteria -->
+      <div style="background: #fef3f2; border: 1px solid #fecaca; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #b91c1c;">
+          <i class="fas fa-exclamation-triangle"></i> Principales Deficiencias por Criterio
+        </h4>
+        ${stats.topDeficientCriteria.length > 0 ? `
+          <div class="table-scroll">
+            <table class="data-table" style="font-size: 0.85rem; margin: 0;">
+              <thead>
+                <tr style="background: #fff5f5;">
+                  <th>Criterio</th>
+                  <th>Categoría</th>
+                  <th>Fallos</th>
+                  <th>% de Auditorías</th>
+                  <th>Agentes Afectados</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${stats.topDeficientCriteria.map(criterion => `
+                  <tr>
+                    <td><strong>${criterion.name}</strong></td>
+                    <td><span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; background: ${criterion.category === 'empatia' ? '#dcfce7' : '#dbeafe'}; color: ${criterion.category === 'empatia' ? '#166534' : '#1e40af'};">${this.formatCategoryName(criterion.category)}</span></td>
+                    <td style="text-align: center; font-weight: 600; color: #dc2626;">${criterion.count}</td>
+                    <td style="text-align: center;">
+                      <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div style="flex: 1; height: 8px; background: #fee2e2; border-radius: 4px; overflow: hidden;">
+                          <div style="width: ${criterion.percentage}%; height: 100%; background: #ef4444;"></div>
+                        </div>
+                        <span style="font-weight: 600; color: #dc2626;">${criterion.percentage}%</span>
+                      </div>
+                    </td>
+                    <td style="font-size: 0.8rem; color: var(--text-muted);">${criterion.agents.slice(0, 3).join(', ')}${criterion.agents.length > 3 ? ` (+${criterion.agents.length - 3} más)` : ''}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : '<p style="color: var(--text-muted); text-align: center;">No hay deficiencias registradas</p>'}
+      </div>
+    `;
+
+    // Agents with Pillar Issues
+    html += `
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <!-- Empatía Issues -->
+        <div style="background: #fef3c7; border: 1px solid #fcd34d; border-radius: 0.75rem; padding: 1.25rem;">
+          <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #92400e;">
+            <i class="fas fa-heart" style="color: #f59e0b;"></i> Agentes con Deficiencias en Empatía
+          </h4>
+          ${stats.agentsByPillarIssue.empatia.length > 0 ? `
+            <div style="display: grid; gap: 0.5rem;">
+              ${stats.agentsByPillarIssue.empatia.slice(0, 5).map(agent => `
+                <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <strong>${agent.name}</strong>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">${agent.issueCount}/${agent.totalAudits} auditorías con fallos</div>
+                  </div>
+                  <span style="padding: 0.25rem 0.75rem; border-radius: 0.5rem; font-weight: 700; font-size: 0.9rem; background: #fef3c7; color: #92400e;">${agent.issueRate}%</span>
+                </div>
+              `).join('')}
+            </div>
+            ${stats.agentsByPillarIssue.empatia.length > 5 ? `<p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">+${stats.agentsByPillarIssue.empatia.length - 5} agentes más</p>` : ''}
+          ` : '<p style="color: var(--text-muted); text-align: center;">No hay agentes con deficiencias significativas en empatía</p>'}
+        </div>
+
+        <!-- Gestión Issues -->
+        <div style="background: #fee2e2; border: 1px solid #fca5a5; border-radius: 0.75rem; padding: 1.25rem;">
+          <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #991b1b;">
+            <i class="fas fa-cogs" style="color: #ef4444;"></i> Agentes con Deficiencias en Gestión
+          </h4>
+          ${stats.agentsByPillarIssue.gestion.length > 0 ? `
+            <div style="display: grid; gap: 0.5rem;">
+              ${stats.agentsByPillarIssue.gestion.slice(0, 5).map(agent => `
+                <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <strong>${agent.name}</strong>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">${agent.issueCount}/${agent.totalAudits} auditorías con fallos</div>
+                  </div>
+                  <span style="padding: 0.25rem 0.75rem; border-radius: 0.5rem; font-weight: 700; font-size: 0.9rem; background: #fee2e2; color: #991b1b;">${agent.issueRate}%</span>
+                </div>
+              `).join('')}
+            </div>
+            ${stats.agentsByPillarIssue.gestion.length > 5 ? `<p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">+${stats.agentsByPillarIssue.gestion.length - 5} agentes más</p>` : ''}
+          ` : '<p style="color: var(--text-muted); text-align: center;">No hay agentes con deficiencias significativas en gestión</p>'}
+        </div>
+      </div>
+    `;
+
+    // Agent Rankings
+    html += `
+      <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #166534;">
+          <i class="fas fa-trophy" style="color: #22c55e;"></i> Ranking de Agentes
+        </h4>
+        ${stats.agentRankings.length > 0 ? `
+          <div class="table-scroll">
+            <table class="data-table" style="font-size: 0.85rem; margin: 0;">
+              <thead>
+                <tr style="background: #f0fdf4;">
+                  <th style="width: 50px;">#</th>
+                  <th>Agente</th>
+                  <th style="text-align: center;">Auditorías</th>
+                  <th style="text-align: center;">Prom. Calidad</th>
+                  <th style="text-align: center;">% Fallos Empatía</th>
+                  <th style="text-align: center;">% Fallos Gestión</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${stats.agentRankings.slice(0, 15).map((agent, index) => `
+                  <tr>
+                    <td style="text-align: center; font-weight: 700; color: ${index < 3 ? '#f59e0b' : 'var(--text-muted)'};">
+                      ${index < 3 ? ['🥇', '🥈', '🥉'][index] : (index + 1)}
+                    </td>
+                    <td><strong>${agent.name}</strong></td>
+                    <td style="text-align: center;">${agent.totalAudits}</td>
+                    <td style="text-align: center; font-weight: 600; color: ${agent.averageScore >= 90 ? '#16a34a' : agent.averageScore >= 80 ? '#0ea5e9' : agent.averageScore >= 60 ? '#d97706' : '#dc2626'};">${agent.averageScore}%</td>
+                    <td style="text-align: center;">
+                      <span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; background: ${agent.empatiaIssueRate === 0 ? '#dcfce7' : '#fef3c7'}; color: ${agent.empatiaIssueRate === 0 ? '#16a34a' : '#d97706'};">${agent.empatiaIssueRate}%</span>
+                    </td>
+                    <td style="text-align: center;">
+                      <span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; background: ${agent.gestionIssueRate === 0 ? '#dcfce7' : '#fee2e2'}; color: ${agent.gestionIssueRate === 0 ? '#16a34a' : '#dc2626'};">${agent.gestionIssueRate}%</span>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          ${stats.agentRankings.length > 15 ? `<p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem; text-align: center;">Mostrando top 15 de ${stats.agentRankings.length} agentes</p>` : ''}
+        ` : '<p style="color: var(--text-muted); text-align: center;">No hay datos de agentes disponibles</p>'}
+      </div>
+    `;
+
+    // Detailed Criteria Analysis (Expandable)
+    html += `
+      <div style="background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: var(--text-primary);">
+          <i class="fas fa-clipboard-list" style="color: #6366f1;"></i> Análisis Detallado por Criterio
+        </h4>
+        
+        <!-- Empatía Criteria -->
+        <div style="margin-bottom: 1rem;">
+          <h5 style="font-size: 0.9rem; font-weight: 600; margin: 0 0 0.5rem 0; color: #38CEA6; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fas fa-heart"></i> Pilar Empatía (50%)
+          </h5>
+          <div style="display: grid; gap: 0.5rem;">
+            ${DataManager.AUDIT_CRITERIA.empatia.map(criterion => {
+              const deficiency = stats.criteriaDeficiencies[criterion.id] || { count: 0, percentage: 0 };
+              return `
+                <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid ${deficiency.percentage >= 30 ? '#ef4444' : deficiency.percentage >= 15 ? '#f59e0b' : '#38CEA6'};">
+                  <div>
+                    <strong style="font-size: 0.85rem;">${criterion.name}</strong>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">${criterion.description}</div>
+                  </div>
+                  <div style="text-align: right;">
+                    <div style="font-weight: 700; color: ${deficiency.percentage >= 30 ? '#dc2626' : deficiency.percentage >= 15 ? '#d97706' : '#16a34a'};">${deficiency.percentage}%</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">${deficiency.count} fallos</div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Gestión Criteria -->
+        <div>
+          <h5 style="font-size: 0.9rem; font-weight: 600; margin: 0 0 0.5rem 0; color: #f59e0b; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fas fa-cogs"></i> Pilar Gestión (50%)
+          </h5>
+          
+          <!-- Gestión de Ticket -->
+          <div style="margin-bottom: 0.75rem;">
+            <h6 style="font-size: 0.85rem; font-weight: 600; margin: 0 0 0.5rem 0; color: var(--text-primary);">Gestión de Ticket (33%)</h6>
+            <div style="display: grid; gap: 0.5rem;">
+              ${DataManager.AUDIT_CRITERIA.gestion.ticket.map(criterion => {
+                const deficiency = stats.criteriaDeficiencies[criterion.id] || { count: 0, percentage: 0 };
+                return `
+                  <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid ${deficiency.percentage >= 30 ? '#ef4444' : deficiency.percentage >= 15 ? '#f59e0b' : '#f59e0b33'};">
+                    <div>
+                      <strong style="font-size: 0.85rem;">${criterion.name}</strong>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${criterion.description}</div>
+                    </div>
+                    <div style="text-align: right;">
+                      <div style="font-weight: 700; color: ${deficiency.percentage >= 30 ? '#dc2626' : deficiency.percentage >= 15 ? '#d97706' : '#16a34a'};">${deficiency.percentage}%</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${deficiency.count} fallos</div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Conocimiento Integral -->
+          <div style="margin-bottom: 0.75rem;">
+            <h6 style="font-size: 0.85rem; font-weight: 600; margin: 0 0 0.5rem 0; color: var(--text-primary);">Conocimiento Integral (33%)</h6>
+            <div style="display: grid; gap: 0.5rem;">
+              ${DataManager.AUDIT_CRITERIA.gestion.conocimiento.map(criterion => {
+                const deficiency = stats.criteriaDeficiencies[criterion.id] || { count: 0, percentage: 0 };
+                return `
+                  <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid ${deficiency.percentage >= 30 ? '#ef4444' : deficiency.percentage >= 15 ? '#f59e0b' : '#f59e0b33'};">
+                    <div>
+                      <strong style="font-size: 0.85rem;">${criterion.name}</strong>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${criterion.description}</div>
+                    </div>
+                    <div style="text-align: right;">
+                      <div style="font-weight: 700; color: ${deficiency.percentage >= 30 ? '#dc2626' : deficiency.percentage >= 15 ? '#d97706' : '#16a34a'};">${deficiency.percentage}%</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${deficiency.count} fallos</div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Herramientas -->
+          <div>
+            <h6 style="font-size: 0.85rem; font-weight: 600; margin: 0 0 0.5rem 0; color: var(--text-primary);">Uso Estratégico de Herramientas (33%)</h6>
+            <div style="display: grid; gap: 0.5rem;">
+              ${DataManager.AUDIT_CRITERIA.gestion.herramientas.map(criterion => {
+                const deficiency = stats.criteriaDeficiencies[criterion.id] || { count: 0, percentage: 0 };
+                return `
+                  <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid ${deficiency.percentage >= 30 ? '#ef4444' : deficiency.percentage >= 15 ? '#f59e0b' : '#f59e0b33'};">
+                    <div>
+                      <strong style="font-size: 0.85rem;">${criterion.name}</strong>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${criterion.description}</div>
+                    </div>
+                    <div style="text-align: right;">
+                      <div style="font-weight: 700; color: ${deficiency.percentage >= 30 ? '#dc2626' : deficiency.percentage >= 15 ? '#d97706' : '#16a34a'};">${deficiency.percentage}%</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${deficiency.count} fallos</div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    container.innerHTML = html;
+  },
+
+  formatCategoryName(category) {
+    const names = {
+      'empatia': 'Empatía',
+      'gestion-ticket': 'Gestión Ticket',
+      'gestion-conocimiento': 'Conocimiento',
+      'gestion-herramientas': 'Herramientas'
+    };
+    return names[category] || category;
   }
 };
 

@@ -83,7 +83,16 @@ body {
   font-weight: 400;
   margin: 0;
   padding: 0;
-  overflow-x: auto;
+  /* Evita que el scrollbar global compita con los scroll internos (tablas) */
+  overflow-x: hidden;
+}
+
+/* Sticky columns inside scrollable tables can fail in some browsers when an ancestor uses backdrop-filter.
+   Limit the blur effect in the heavy table views so the left sticky column stays visible while scrolling. */
+#metricsWeeklyView .glass,
+#connectionHoursView .glass,
+#metricsMonthlyView .glass {
+  backdrop-filter: none;
 }
 
 .bg-grid {
@@ -100,7 +109,9 @@ body {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  /* Importante: evita que tablas anchas ensanchen el grid (y queden recortadas con overflow-x hidden)
+     Permitimos que la columna de contenido se encoja y el overflow ocurra dentro de .table-scroll */
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: 1.25rem;
   padding: 1.25rem;
   width: 100%;
@@ -174,7 +185,10 @@ body {
 
 .nav-footer { margin-top: auto; padding-top: 0.5rem; border-top: 1px dashed rgba(0,0,0,0.08); }
 
-.main-area { padding-bottom: 2rem; }
+.main-area {
+  padding-bottom: 2rem;
+  min-width: 0;
+}
 
 .hero {
   border-radius: 1.5rem;
@@ -327,15 +341,18 @@ body {
 .label-small { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.3rem; }
 
 .table-scroll { 
-  overflow-x: auto;
+  overflow-x: scroll;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
   -webkit-overflow-scrolling: touch;
   /* Ensure scrollbar is always visible when needed */
   overflow-y: hidden;
   margin-bottom: 1rem;
   position: relative;
-  /* Enable keyboard focus */
-  tabindex: 0;
+  scrollbar-gutter: stable;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
 }
 .table-scroll:focus {
   outline: 2px solid #38CEA6;
@@ -366,6 +383,12 @@ body {
   table-layout: auto;
   font-size: 0.85rem;
 }
+
+/* Métricas Semanales: fuerza overflow horizontal para que siempre se pueda desplazar */
+.weekly-metrics-table {
+  width: max-content;
+  min-width: 2200px;
+}
 .data-table th, .data-table td { 
   padding: 0.75rem 0.6rem; 
   text-align: left; 
@@ -392,6 +415,24 @@ body {
 .data-table tbody tr:hover td { 
   background: linear-gradient(135deg, #f8fcff, #eefbf7);
   transform: scale(1.01);
+}
+
+/* Métricas Semanales: mantiene visible la columna de nombres (tipo “congelar paneles”) */
+#metricsWeeklyView .data-table th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 6;
+}
+
+#metricsWeeklyView .data-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+}
+
+/* Evita que el hover cree stacking contexts que tapen la columna sticky */
+#metricsWeeklyView .data-table tbody tr:hover td {
+  transform: none;
 }
 .empty { text-align: center; color: var(--text-muted); padding: 1rem 0; }
 
