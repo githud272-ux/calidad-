@@ -40,8 +40,7 @@ const DataManager = {
     AUDIT_VIEWS: 'calidad_audit_views',
     AUDIT_COMMENTS: 'calidad_audit_comments',
     ACTIVITY_LOG: 'calidad_activity_log',
-    CONNECTION_HOURS: 'calidad_connection_hours',
-    INCIDENTS: 'calidad_incidents'
+    CONNECTION_HOURS: 'calidad_connection_hours'
   },
 
   // Remove all persisted app data so every load starts clean
@@ -224,10 +223,14 @@ const DataManager = {
   addTeamMember(teamId, memberData, addedBy = null, addedByRole = null) {
     const teams = this.getAllTeams();
     if (teams[teamId]) {
+      const sanitizedRotationDays = Array.isArray(memberData.rotationDays)
+        ? Array.from(new Set(memberData.rotationDays.map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n >= 0 && n <= 6)))
+        : [];
       teams[teamId].members.push({
         ...memberData,
         team: teamId,
         subTeam: memberData.subTeam || null,
+        rotationDays: sanitizedRotationDays,
         addedAt: new Date().toISOString(),
         addedBy: addedBy
       });
@@ -1061,6 +1064,10 @@ const DataManager = {
       team: teamId
     };
 
+    if (Array.isArray(memberData.rotationDays)) {
+      updatedMember.rotationDays = Array.from(new Set(memberData.rotationDays.map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n >= 0 && n <= 6)));
+    }
+
     teams[teamId].members[memberIndex] = updatedMember;
     SafeStorage.setItem(this.STORAGE_KEYS.TEAMS, JSON.stringify(teams));
     return true;
@@ -1513,156 +1520,6 @@ const DataManager = {
   getGlobalStatistics(year, month) {
     const audits = this.getAuditsForStatistics(year, month);
     return this.calculateAuditStatistics(audits);
-  },
-
-  // ==================== INCIDENT MANAGEMENT ====================
-  
-  // Get all incidents
-  getAllIncidents() {
-    return JSON.parse(SafeStorage.getItem(this.STORAGE_KEYS.INCIDENTS) || '[]');
-  },
-
-  // Save an incident
-  // incident: { id, date, type, teams: [], description, createdAt }
-  saveIncident(incident) {
-    const incidents = this.getAllIncidents();
-    const existingIndex = incidents.findIndex(i => i.id === incident.id);
-    
-    if (existingIndex >= 0) {
-      incidents[existingIndex] = incident;
-    } else {
-      incident.id = this.generateId();
-      incident.createdAt = new Date().toISOString();
-      incidents.push(incident);
-    }
-    
-    SafeStorage.setItem(this.STORAGE_KEYS.INCIDENTS, JSON.stringify(incidents));
-    return incident;
-  },
-
-  // Delete an incident
-  deleteIncident(incidentId) {
-    const incidents = this.getAllIncidents();
-    const filtered = incidents.filter(i => i.id !== incidentId);
-    SafeStorage.setItem(this.STORAGE_KEYS.INCIDENTS, JSON.stringify(filtered));
-  },
-
-  // Check if a specific date has incidents for a team
-  hasIncidentForDate(date, teamId) {
-    const incidents = this.getAllIncidents();
-    return incidents.some(incident => 
-      incident.date === date && 
-      incident.teams.includes(teamId)
-    );
-  },
-
-  // Get incidents for a specific date
-  getIncidentsForDate(date) {
-    const incidents = this.getAllIncidents();
-    return incidents.filter(incident => incident.date === date);
-  },
-
-  // Get all incident types (for dropdown/autocomplete)
-  getIncidentTypes() {
-    const incidents = this.getAllIncidents();
-    const types = [...new Set(incidents.map(i => i.type).filter(Boolean))];
-    return types.sort();
-  },
-
-  // Calculate satisfaction excluding incident days (Scenario B)
-  // Returns object with:
-  // - scenarioA: { pct: number|null, totalTickets: number, totalGood: number } - All data
-  // - scenarioB: { pct: number|null, totalTickets: number, totalGood: number } - Excluding incident days
-  // - deviation: number - Percentage difference (scenarioB - scenarioA)
-  // - hasIncidents: boolean - Whether any incidents were found for this team
-  calculateAgentSatisfactionWithIncidents(agentName, year, month, teamId) {
-    const weeklyData = this.getWeeklyMetricsData(year, month);
-    const weekConfig = this.getWeekConfig(year, month);
-    
-    if (!weeklyData[agentName]) {
-      return {
-        scenarioA: { pct: null, totalTickets: 0, totalGood: 0 },
-        scenarioB: { pct: null, totalTickets: 0, totalGood: 0 },
-        deviation: 0,
-        hasIncidents: false
-      };
-    }
-    
-    let scenarioA = { totalTickets: 0, totalGood: 0 };
-    let scenarioB = { totalTickets: 0, totalGood: 0 };
-    let hasIncidents = false;
-    
-    // Build a map of dates that have incidents for this team
-    const incidentDates = new Set();
-    if (teamId) {
-      const incidents = this.getAllIncidents();
-      incidents.forEach(incident => {
-        if (incident.teams.includes(teamId)) {
-          incidentDates.add(incident.date);
-          hasIncidents = true;
-        }
-      });
-    }
-    
-    // Iterate through weeks and days to check for incidents
-    Object.entries(weeklyData[agentName]).forEach(([weekKey, weekData]) => {
-      if (!weekData.tickets) return;
-      
-      // Scenario A: Include all data
-      scenarioA.totalTickets += weekData.tickets || 0;
-      scenarioA.totalGood += weekData.ticketsGood || 0;
-      
-      // Scenario B: Exclude weeks with incidents
-      // We need to check if this week contains incident days
-      const weekIndex = parseInt(weekKey);
-      if (weekConfig && weekConfig[weekIndex]) {
-        const week = weekConfig[weekIndex];
-        const startDate = new Date(week.startDate);
-        const endDate = new Date(week.endDate);
-        
-        // Check if any day in this week has an incident
-        let weekHasIncident = false;
-        if (startDate <= endDate) {
-          const currentDate = new Date(startDate);
-          while (currentDate <= endDate) {
-            const dateStr = currentDate.toISOString().split('T')[0];
-            if (incidentDates.has(dateStr)) {
-              weekHasIncident = true;
-              break;
-            }
-            currentDate.setDate(currentDate.getDate() + 1);
-          }
-        }
-        
-        // If week has no incidents, include in scenario B
-        if (!weekHasIncident) {
-          scenarioB.totalTickets += weekData.tickets || 0;
-          scenarioB.totalGood += weekData.ticketsGood || 0;
-        }
-      } else {
-        // If no week config, include in scenario B (no way to check dates)
-        scenarioB.totalTickets += weekData.tickets || 0;
-        scenarioB.totalGood += weekData.ticketsGood || 0;
-      }
-    });
-    
-    const scenarioAPct = scenarioA.totalTickets > 0 
-      ? Math.round((scenarioA.totalGood / scenarioA.totalTickets) * 100) 
-      : null;
-    const scenarioBPct = scenarioB.totalTickets > 0 
-      ? Math.round((scenarioB.totalGood / scenarioB.totalTickets) * 100) 
-      : null;
-    
-    const deviation = (scenarioAPct !== null && scenarioBPct !== null) 
-      ? scenarioBPct - scenarioAPct 
-      : 0;
-    
-    return {
-      scenarioA: { pct: scenarioAPct, ...scenarioA },
-      scenarioB: { pct: scenarioBPct, ...scenarioB },
-      deviation,
-      hasIncidents
-    };
   }
 };
 

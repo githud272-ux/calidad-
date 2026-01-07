@@ -647,6 +647,60 @@ const App = {
     return [1, 2, 3, 4, 5];
   },
 
+  getDefaultRotationDaysForShift(shift) {
+    const normalized = (shift || '').toLowerCase();
+    if (!shift) return [];
+    if (normalized.includes('fin de semana') && !normalized.includes('semana completa')) {
+      return [0, 6];
+    }
+    return [1, 2, 3, 4, 5];
+  },
+
+  setRotationDayCheckboxes(days) {
+    const checkboxes = document.querySelectorAll('input[name="memberRotationDays"]');
+    if (!checkboxes || checkboxes.length === 0) return;
+    const normalized = Array.isArray(days)
+      ? Array.from(new Set(days.map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n >= 0 && n <= 6)))
+      : [];
+    checkboxes.forEach(cb => {
+      const value = parseInt(cb.value, 10);
+      cb.checked = normalized.includes(value);
+    });
+  },
+
+  collectRotationDayCheckboxes() {
+    const checkboxes = document.querySelectorAll('input[name="memberRotationDays"]:checked');
+    if (!checkboxes || checkboxes.length === 0) return [];
+    return Array.from(checkboxes).map(cb => parseInt(cb.value, 10)).filter(n => !isNaN(n) && n >= 0 && n <= 6);
+  },
+
+  resetRotationDayCheckboxes() {
+    this.setRotationDayCheckboxes([]);
+  },
+
+  toggleRotationDaysSection(show) {
+    const section = document.getElementById('rotationDaysSection');
+    if (!section) return;
+    section.style.display = show ? 'block' : 'none';
+  },
+
+  applyRotationDefaultsForShift(shift) {
+    if (!shift) {
+      this.resetRotationDayCheckboxes();
+      return;
+    }
+    const defaults = this.getDefaultRotationDaysForShift(shift);
+    if (defaults.length > 0) {
+      this.setRotationDayCheckboxes(defaults);
+    } else {
+      this.resetRotationDayCheckboxes();
+    }
+  },
+
+  onMemberShiftChange(shift) {
+    this.applyRotationDefaultsForShift(shift);
+  },
+
   // Format seconds to H:MM:SS (allows negative)
   formatSignedHMS(seconds) {
     const s = parseInt(seconds, 10) || 0;
@@ -679,6 +733,7 @@ const App = {
     const currentMonth = new Date().getMonth();
     const configuredMonths = DataManager.getConfiguredMonths(currentYear);
     const isEditor = DataManager.isEditor();
+    const canSeeMissing = DataManager.isAdmin();
     
     // For editors: show all 12 months
     // For users: show only current month + 2 months ahead (max 2 months advance)
@@ -936,34 +991,6 @@ const App = {
       manualMetricsForm.addEventListener('submit', (e) => this.handleManualMetricsSubmit(e));
     }
 
-    // Incident modal
-    const addIncidentBtn = document.getElementById('addIncidentBtn');
-    const closeIncidentModalBtn = document.getElementById('closeIncidentModalBtn');
-    const cancelIncidentBtn = document.getElementById('cancelIncidentBtn');
-    if (addIncidentBtn) {
-      addIncidentBtn.addEventListener('click', () => this.openIncidentModal());
-    }
-    if (closeIncidentModalBtn) {
-      closeIncidentModalBtn.addEventListener('click', () => this.closeIncidentModal());
-    }
-    if (cancelIncidentBtn) {
-      cancelIncidentBtn.addEventListener('click', () => this.closeIncidentModal());
-    }
-
-    const incidentForm = document.getElementById('incidentForm');
-    if (incidentForm) {
-      incidentForm.addEventListener('submit', (e) => this.handleIncidentSubmit(e));
-    }
-
-    const incidentModal = document.getElementById('incidentModal');
-    if (incidentModal) {
-      incidentModal.addEventListener('click', (e) => {
-        if (e.target === incidentModal) {
-          this.closeIncidentModal();
-        }
-      });
-    }
-
     // Add member modal
     const closeAddMemberBtn = document.getElementById('closeAddMemberBtn');
     const cancelAddMemberBtn = document.getElementById('cancelAddMemberBtn');
@@ -987,6 +1014,10 @@ const App = {
         }
       });
     }
+
+    document.querySelectorAll('input[name="memberShift"]').forEach(radio => {
+      radio.addEventListener('change', (e) => this.onMemberShiftChange(e.target.value));
+    });
     
     // Keyboard navigation for table scrolling
     this.setupTableKeyboardNavigation();
@@ -1096,6 +1127,45 @@ const App = {
     // Use MutationObserver to detect when tables are added to DOM
     const observer = new MutationObserver(makeTablesFocusable);
     observer.observe(document.body, { childList: true, subtree: true });
+  },
+
+  // Setup sticky agent names that follow horizontal scroll
+  setupStickyAgentNames() {
+    // Find all table-scroll containers in weekly metrics view
+    const weeklyView = document.getElementById('metricsWeeklyView');
+    if (!weeklyView) return;
+
+    const tableScrolls = weeklyView.querySelectorAll('.table-scroll');
+    
+    tableScrolls.forEach(scrollContainer => {
+      // Remove any existing scroll listener to avoid duplicates
+      if (scrollContainer._stickyScrollHandler) {
+        scrollContainer.removeEventListener('scroll', scrollContainer._stickyScrollHandler);
+      }
+
+      // Create scroll handler
+      const scrollHandler = () => {
+        const scrollLeft = scrollContainer.scrollLeft;
+        const table = scrollContainer.querySelector('.data-table');
+        
+        if (!table) return;
+
+        // Get all first column cells (agent names)
+        const firstColCells = table.querySelectorAll('th:first-child, td:first-child');
+        
+        // Update the left position of sticky columns based on scroll
+        // The names will move with the scroll to stay visible
+        firstColCells.forEach(cell => {
+          cell.style.left = `${scrollLeft}px`;
+        });
+      };
+
+      // Attach the handler
+      scrollContainer.addEventListener('scroll', scrollHandler, { passive: true });
+      
+      // Store reference to remove it later if needed
+      scrollContainer._stickyScrollHandler = scrollHandler;
+    });
   },
 
   // Authentication handlers
@@ -1413,10 +1483,6 @@ const App = {
         document.getElementById('statisticsView').classList.remove('hidden');
         this.initializeStatisticsFilters();
         this.loadStatistics();
-        break;
-      case 'incidents':
-        document.getElementById('incidentsView').classList.remove('hidden');
-        this.loadIncidentsView();
         break;
     }
   },
@@ -2813,6 +2879,9 @@ const App = {
       shiftSection.style.display = 'none';
     }
     
+    this.toggleRotationDaysSection(false);
+    this.resetRotationDayCheckboxes();
+
     // Remove required attribute from shift radios
     document.querySelectorAll('input[name="memberShift"]').forEach(radio => {
       radio.required = false;
@@ -2867,6 +2936,9 @@ const App = {
       shiftSection.style.display = 'none';
     }
     
+    this.toggleRotationDaysSection(false);
+    this.resetRotationDayCheckboxes();
+
     // Remove required attribute from shift radios
     document.querySelectorAll('input[name="memberShift"]').forEach(radio => {
       radio.required = false;
@@ -2923,6 +2995,9 @@ const App = {
       shiftSection.style.display = 'none';
     }
     
+    this.toggleRotationDaysSection(false);
+    this.resetRotationDayCheckboxes();
+
     // Remove required attribute from shift radios
     document.querySelectorAll('input[name="memberShift"]').forEach(radio => {
       radio.required = false;
@@ -2983,6 +3058,9 @@ const App = {
       shiftSection.style.display = 'block';
     }
     
+    this.toggleRotationDaysSection(true);
+    this.resetRotationDayCheckboxes();
+
     // Restore required attribute for shift radios
     document.querySelectorAll('input[name="memberShift"]').forEach(radio => {
       radio.required = true;
@@ -3029,9 +3107,30 @@ const App = {
       subTeamInput.value = member.subTeam || '';
     }
 
+    const isSupervisorType = member.role === 'supervisor';
+    const isAnalistaType = member.role === 'analista';
+    const isCalidadType = member.role === 'calidad';
+    const isSpecialRole = isSupervisorType || isAnalistaType || isCalidadType;
+
+    const shiftSection = document.getElementById('shiftSection');
+    if (shiftSection) {
+      shiftSection.style.display = isSpecialRole ? 'none' : 'block';
+    }
+
     document.querySelectorAll('input[name="memberShift"]').forEach(radio => {
+      radio.required = !isSpecialRole;
       radio.checked = radio.value === member.shift;
     });
+
+    this.toggleRotationDaysSection(!isSpecialRole);
+    if (!isSpecialRole) {
+      const rotationPreset = Array.isArray(member.rotationDays) && member.rotationDays.length > 0
+        ? member.rotationDays
+        : this.getDefaultRotationDaysForShift(member.shift);
+      this.setRotationDayCheckboxes(rotationPreset);
+    } else {
+      this.resetRotationDayCheckboxes();
+    }
 
     const submitBtn = document.querySelector('#addMemberForm button[type="submit"]');
     if (submitBtn) {
@@ -3106,6 +3205,13 @@ const App = {
     if (!isSpecialRole) {
       memberData.shift = shift;
       memberData.subTeam = subTeam;
+      let rotationDays = this.collectRotationDayCheckboxes();
+      if ((!rotationDays || rotationDays.length === 0) && shift) {
+        rotationDays = this.getDefaultRotationDaysForShift(shift);
+      }
+      memberData.rotationDays = rotationDays;
+    } else {
+      memberData.rotationDays = [];
     }
     
     let success = false;
@@ -3905,6 +4011,8 @@ const App = {
       container.innerHTML = fullHTML;
       // Re-apply custom scrollbars for dynamically added tables
       this.initializeOverlayScrollbars();
+      // Setup sticky agent names that follow horizontal scroll
+      this.setupStickyAgentNames();
       return;
     }
     
@@ -4291,6 +4399,8 @@ const App = {
     container.innerHTML = tableHTML;
     // Re-apply custom scrollbars for dynamically added tables
     this.initializeOverlayScrollbars();
+    // Setup sticky agent names that follow horizontal scroll
+    this.setupStickyAgentNames();
   },
 
   // Helper function to render weekly metrics table for a single team
@@ -6505,7 +6615,7 @@ const App = {
               if (!isInRotation) {
                 cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
               } else {
-                const vis = isEditor ? 'visible' : 'hidden';
+                const vis = canSeeMissing ? 'visible' : 'hidden';
                 cellContent = `<span style="color: #ef4444; font-weight: 700; visibility: ${vis};">-${this.formatSignedHMS(expectedDailySeconds)}</span>`;
                 cellStyle += ' background: rgba(239, 68, 68, 0.08);';
               }
@@ -6516,17 +6626,20 @@ const App = {
               cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
             } else {
               // FALTA: día obligatorio sin conexión
-              const vis = isEditor ? 'visible' : 'hidden';
+              const vis = canSeeMissing ? 'visible' : 'hidden';
               cellContent = `<span style="color: #ef4444; font-weight: 700; visibility: ${vis};">-${this.formatSignedHMS(expectedDailySeconds)}</span>`;
               cellStyle += ' background: rgba(239, 68, 68, 0.08);';
             }
           }
 
           // Conteo de días obligatorios (rotación) considerando justificaciones
-          if (isInRotation) {
-            const status = dayData?.status;
-            // Descanso/Vacaciones/Vacante/Cambio justifican y sacan el día del esperado
-            if (status !== 'libre' && status !== 'vacaciones' && status !== 'vacante' && status !== 'guardia') {
+          if (isInRotation && dayData) {
+            const status = String(dayData.status || '').toLowerCase();
+            const secondsWorked = dayData.hours ? DataManager.parseTimeToSeconds(dayData.hours) : 0;
+            const hasHours = secondsWorked > 0;
+            const isCambio = status === 'cambio' || status === 'cambio_recibido';
+            const isVacante = status === 'guardia' || status === 'vacante';
+            if (hasHours || isCambio || isVacante) {
               requiredDays += 1;
             }
           }
@@ -6590,6 +6703,7 @@ const App = {
     if (agentsList.length === 0) return '';
     
     const shortDayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    const canSeeMissing = DataManager.isAdmin();
     
     // Helper to format seconds to H:MM:SS
     const formatTimeHMS = (seconds) => {
@@ -6761,7 +6875,7 @@ const App = {
               if (!isInRotation) {
                 cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
               } else {
-                const vis = isEditor ? 'visible' : 'hidden';
+                const vis = canSeeMissing ? 'visible' : 'hidden';
                 cellContent = `<span style="color: #ef4444; font-weight: 700; visibility: ${vis};">-${this.formatSignedHMS(expectedDailySeconds)}</span>`;
                 cellStyle += ' background: rgba(239, 68, 68, 0.08);';
               }
@@ -6770,16 +6884,20 @@ const App = {
             if (!isInRotation) {
               cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
             } else {
-              const vis = isEditor ? 'visible' : 'hidden';
+              const vis = canSeeMissing ? 'visible' : 'hidden';
               cellContent = `<span style="color: #ef4444; font-weight: 700; visibility: ${vis};">-${this.formatSignedHMS(expectedDailySeconds)}</span>`;
               cellStyle += ' background: rgba(239, 68, 68, 0.08);';
             }
           }
 
           // Conteo de días obligatorios según rotación
-          if (isInRotation) {
-            const status = dayData?.status;
-            if (status !== 'libre' && status !== 'vacaciones' && status !== 'vacante' && status !== 'guardia') {
+          if (isInRotation && dayData) {
+            const status = String(dayData.status || '').toLowerCase();
+            const secondsWorked = dayData.hours ? DataManager.parseTimeToSeconds(dayData.hours) : 0;
+            const hasHours = secondsWorked > 0;
+            const isCambio = status === 'cambio' || status === 'cambio_recibido';
+            const isVacante = status === 'guardia' || status === 'vacante';
+            if (hasHours || isCambio || isVacante) {
               requiredDays += 1;
             }
           }
@@ -6985,14 +7103,6 @@ const App = {
     stats = DataManager.calculateAuditStatistics(audits);
 
     this.renderStatistics(stats, monthName, year, displayName, selectedTeam, selectedAgent);
-    
-    // Load CSAT comparison if a team is selected
-    if (selectedTeam) {
-      this.loadCSATComparison(year, monthIndex, selectedTeam, selectedAgent);
-    } else {
-      // Hide CSAT comparison when no team selected
-      document.getElementById('csatComparisonContainer').style.display = 'none';
-    }
   },
 
   renderStatistics(stats, monthName, year, teamName, teamId, selectedAgent) {
@@ -7317,368 +7427,6 @@ const App = {
       'gestion-herramientas': 'Herramientas'
     };
     return names[category] || category;
-  },
-
-  // ==================== INCIDENT MANAGEMENT ====================
-
-  loadIncidentsView() {
-    this.renderIncidentsTable();
-  },
-
-  renderIncidentsTable() {
-    const tbody = document.getElementById('incidentsTableBody');
-    const incidents = DataManager.getAllIncidents();
-
-    if (incidents.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty">No hay incidencias registradas</td></tr>';
-      return;
-    }
-
-    // Sort by date descending (newest first)
-    incidents.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-    const html = incidents.map(incident => {
-      const date = new Date(incident.date);
-      const formattedDate = date.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      
-      // Get team names
-      const teamNames = incident.teams.map(teamId => {
-        const team = DataManager.TEAMS.find(t => t.id === teamId);
-        return team ? team.name : teamId;
-      }).join(', ');
-
-      return `
-        <tr>
-          <td style="font-weight: 600;">${formattedDate}</td>
-          <td>
-            <span style="background: #fef3c7; color: #92400e; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.85rem; font-weight: 500;">
-              ${incident.type}
-            </span>
-          </td>
-          <td style="font-size: 0.85rem;">${teamNames}</td>
-          <td style="font-size: 0.85rem; color: var(--text-muted);">${incident.description || '—'}</td>
-          <td>
-            <div style="display: flex; gap: 0.5rem; justify-content: center;">
-              <button 
-                class="btn-mini" 
-                onclick="App.editIncident('${incident.id}')"
-                style="background: #dbeafe; color: #1e40af; border: none; cursor: pointer;"
-                title="Editar"
-              >
-                <i class="fas fa-edit"></i>
-              </button>
-              <button 
-                class="btn-mini" 
-                onclick="App.deleteIncident('${incident.id}')"
-                style="background: #fee2e2; color: #991b1b; border: none; cursor: pointer;"
-                title="Eliminar"
-              >
-                <i class="fas fa-trash"></i>
-              </button>
-            </div>
-          </td>
-        </tr>
-      `;
-    }).join('');
-
-    tbody.innerHTML = html;
-  },
-
-  openIncidentModal(incidentId = null) {
-    const modal = document.getElementById('incidentModal');
-    const form = document.getElementById('incidentForm');
-    const title = document.getElementById('incidentModalTitle');
-    const teamsContainer = document.getElementById('incidentTeamsCheckboxes');
-
-    // Reset form
-    form.reset();
-
-    // Populate existing incident types for datalist
-    const typesList = document.getElementById('incidentTypesList');
-    const existingTypes = DataManager.getIncidentTypes();
-    typesList.innerHTML = existingTypes.map(type => `<option value="${type}">`).join('');
-
-    // Generate team checkboxes
-    teamsContainer.innerHTML = DataManager.TEAMS.map(team => `
-      <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; padding: 0.5rem; border-radius: 0.25rem; transition: background 0.2s;">
-        <input 
-          type="checkbox" 
-          name="incidentTeam" 
-          value="${team.id}"
-          style="width: 1rem; height: 1rem; cursor: pointer;"
-        >
-        <div style="width: 12px; height: 12px; border-radius: 50%; background: ${team.color};"></div>
-        <span style="font-size: 0.9rem;">${team.name}</span>
-      </label>
-    `).join('');
-
-    // If editing, populate form with existing data
-    if (incidentId) {
-      const incidents = DataManager.getAllIncidents();
-      const incident = incidents.find(i => i.id === incidentId);
-      
-      if (incident) {
-        title.textContent = 'Editar Incidencia';
-        document.getElementById('incidentDate').value = incident.date;
-        document.getElementById('incidentType').value = incident.type;
-        document.getElementById('incidentDescription').value = incident.description || '';
-        
-        // Check the teams
-        incident.teams.forEach(teamId => {
-          const checkbox = teamsContainer.querySelector(`input[value="${teamId}"]`);
-          if (checkbox) checkbox.checked = true;
-        });
-
-        form.dataset.incidentId = incidentId;
-      }
-    } else {
-      title.textContent = 'Registrar Incidencia';
-      delete form.dataset.incidentId;
-    }
-
-    modal.classList.remove('hidden');
-  },
-
-  closeIncidentModal() {
-    document.getElementById('incidentModal').classList.add('hidden');
-  },
-
-  editIncident(incidentId) {
-    this.openIncidentModal(incidentId);
-  },
-
-  deleteIncident(incidentId) {
-    if (confirm('¿Está seguro de eliminar esta incidencia? Esta acción no se puede deshacer.')) {
-      DataManager.deleteIncident(incidentId);
-      this.renderIncidentsTable();
-      
-      // Refresh statistics if it's the current view
-      if (this.currentView === 'statistics') {
-        this.loadStatistics();
-      }
-    }
-  },
-
-  handleIncidentSubmit(e) {
-    e.preventDefault();
-    
-    const form = e.target;
-    const date = document.getElementById('incidentDate').value;
-    const type = document.getElementById('incidentType').value.trim();
-    const description = document.getElementById('incidentDescription').value.trim();
-    
-    // Get selected teams
-    const checkedTeams = Array.from(form.querySelectorAll('input[name="incidentTeam"]:checked'))
-      .map(cb => cb.value);
-
-    if (checkedTeams.length === 0) {
-      alert('Por favor, seleccione al menos un equipo afectado.');
-      return;
-    }
-
-    const incident = {
-      date,
-      type,
-      teams: checkedTeams,
-      description
-    };
-
-    // If editing, preserve the ID
-    if (form.dataset.incidentId) {
-      incident.id = form.dataset.incidentId;
-    }
-
-    DataManager.saveIncident(incident);
-    this.closeIncidentModal();
-    this.renderIncidentsTable();
-
-    // Refresh statistics if it's the current view
-    if (this.currentView === 'statistics') {
-      this.loadStatistics();
-    }
-  },
-
-  // ==================== CSAT COMPARISON ====================
-
-  loadCSATComparison(year, month, teamId, selectedAgent) {
-    const container = document.getElementById('csatComparisonContainer');
-    const content = document.getElementById('csatComparisonContent');
-    
-    // Get all agents from the team
-    const teams = DataManager.getAllTeams();
-    const team = teams[teamId];
-    
-    if (!team || !team.members) {
-      container.style.display = 'none';
-      return;
-    }
-
-    let agents = team.members.map(m => m.name);
-    
-    // If specific agent selected, filter to that agent
-    if (selectedAgent) {
-      agents = agents.filter(name => name === selectedAgent);
-    }
-
-    // Calculate satisfaction for each agent with dual scenarios
-    const agentComparisons = [];
-    agents.forEach(agentName => {
-      const comparison = DataManager.calculateAgentSatisfactionWithIncidents(agentName, year, month, teamId);
-      if (comparison.scenarioA.totalTickets > 0 || comparison.scenarioB.totalTickets > 0) {
-        agentComparisons.push({
-          name: agentName,
-          ...comparison
-        });
-      }
-    });
-
-    if (agentComparisons.length === 0) {
-      container.style.display = 'none';
-      return;
-    }
-
-    // Calculate team averages
-    const teamScenarioA = { totalTickets: 0, totalGood: 0 };
-    const teamScenarioB = { totalTickets: 0, totalGood: 0 };
-    
-    agentComparisons.forEach(agent => {
-      teamScenarioA.totalTickets += agent.scenarioA.totalTickets;
-      teamScenarioA.totalGood += agent.scenarioA.totalGood;
-      teamScenarioB.totalTickets += agent.scenarioB.totalTickets;
-      teamScenarioB.totalGood += agent.scenarioB.totalGood;
-    });
-
-    const teamScenarioAPct = teamScenarioA.totalTickets > 0 
-      ? Math.round((teamScenarioA.totalGood / teamScenarioA.totalTickets) * 100) 
-      : 0;
-    const teamScenarioBPct = teamScenarioB.totalTickets > 0 
-      ? Math.round((teamScenarioB.totalGood / teamScenarioB.totalTickets) * 100) 
-      : 0;
-    const teamDeviation = teamScenarioBPct - teamScenarioAPct;
-
-    // Sort by deviation (most impacted first)
-    agentComparisons.sort((a, b) => Math.abs(b.deviation) - Math.abs(a.deviation));
-
-    // Render the comparison
-    container.style.display = 'block';
-    
-    let html = `
-      <!-- Team Summary -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
-        <div style="background: white; border: 2px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem;">
-          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-            <div style="width: 12px; height: 12px; border-radius: 50%; background: #3b82f6;"></div>
-            <h4 style="font-size: 1rem; font-weight: 700; margin: 0; color: var(--text-primary);">
-              Escenario A - Métrica Real
-            </h4>
-          </div>
-          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
-            Incluye todos los tickets y calificaciones sin exclusiones
-          </p>
-          <div style="font-size: 2.5rem; font-weight: 700; color: #3b82f6;">${teamScenarioAPct}%</div>
-          <div style="font-size: 0.9rem; color: var(--text-muted);">
-            ${teamScenarioA.totalGood.toLocaleString()} buenos de ${teamScenarioA.totalTickets.toLocaleString()} tickets
-          </div>
-        </div>
-
-        <div style="background: white; border: 2px solid #10b981; border-radius: 0.75rem; padding: 1.25rem;">
-          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-            <div style="width: 12px; height: 12px; border-radius: 50%; background: #10b981;"></div>
-            <h4 style="font-size: 1rem; font-weight: 700; margin: 0; color: var(--text-primary);">
-              Escenario B - Métrica Ajustada
-            </h4>
-          </div>
-          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
-            Excluye días con incidencias sistémicas registradas
-          </p>
-          <div style="font-size: 2.5rem; font-weight: 700; color: #10b981;">${teamScenarioBPct}%</div>
-          <div style="font-size: 0.9rem; color: var(--text-muted);">
-            ${teamScenarioB.totalGood.toLocaleString()} buenos de ${teamScenarioB.totalTickets.toLocaleString()} tickets
-          </div>
-          ${teamDeviation !== 0 ? `
-            <div style="margin-top: 0.75rem; padding: 0.5rem; background: ${teamDeviation > 0 ? '#dcfce7' : '#fee2e2'}; border-radius: 0.5rem;">
-              <span style="font-weight: 600; color: ${teamDeviation > 0 ? '#16a34a' : '#dc2626'};">
-                ${teamDeviation > 0 ? '↑' : '↓'} ${Math.abs(teamDeviation)}% ${teamDeviation > 0 ? 'mejor' : 'peor'} sin incidencias
-              </span>
-            </div>
-          ` : ''}
-        </div>
-      </div>
-
-      <!-- Agent Breakdown -->
-      <div style="background: white; border-radius: 0.75rem; padding: 1.25rem;">
-        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: var(--text-primary);">
-          <i class="fas fa-users"></i> Análisis por Agente
-        </h4>
-        <div class="table-scroll">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Agente</th>
-                <th style="text-align: center;">Escenario A<br><small>(Real)</small></th>
-                <th style="text-align: center;">Escenario B<br><small>(Ajustado)</small></th>
-                <th style="text-align: center;">Desviación</th>
-                <th style="text-align: center;">Impacto</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${agentComparisons.map(agent => {
-                const impactColor = agent.deviation === 0 ? '#6b7280' : agent.deviation > 0 ? '#16a34a' : '#dc2626';
-                const impactText = agent.deviation === 0 ? 'Sin cambio' : 
-                  agent.deviation > 0 ? 'Mejora' : 'Deterioro';
-                const scenarioAPct = agent.scenarioA.pct !== null ? agent.scenarioA.pct + '%' : '—';
-                const scenarioBPct = agent.scenarioB.pct !== null ? agent.scenarioB.pct + '%' : '—';
-                
-                return `
-                  <tr>
-                    <td style="font-weight: 600;">${agent.name}</td>
-                    <td style="text-align: center;">
-                      <span style="font-weight: 600; color: #3b82f6;">${scenarioAPct}</span>
-                      <div style="font-size: 0.75rem; color: var(--text-muted);">
-                        ${agent.scenarioA.totalTickets} tickets
-                      </div>
-                    </td>
-                    <td style="text-align: center;">
-                      <span style="font-weight: 600; color: #10b981;">${scenarioBPct}</span>
-                      <div style="font-size: 0.75rem; color: var(--text-muted);">
-                        ${agent.scenarioB.totalTickets} tickets
-                      </div>
-                    </td>
-                    <td style="text-align: center;">
-                      <span style="font-weight: 700; color: ${impactColor};">
-                        ${agent.deviation > 0 ? '+' : ''}${agent.deviation}%
-                      </span>
-                    </td>
-                    <td style="text-align: center;">
-                      <span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.85rem; font-weight: 600; background: ${agent.deviation === 0 ? '#f3f4f6' : agent.deviation > 0 ? '#dcfce7' : '#fee2e2'}; color: ${impactColor};">
-                        ${impactText}
-                      </span>
-                    </td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Insights -->
-      ${teamDeviation !== 0 ? `
-        <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 1px solid #93c5fd; border-radius: 0.75rem; padding: 1.25rem; margin-top: 1.5rem;">
-          <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 0.75rem 0; color: #1e40af;">
-            <i class="fas fa-lightbulb"></i> Análisis de Desviación
-          </h4>
-          <p style="margin: 0; font-size: 0.9rem; line-height: 1.6; color: #1e3a8a;">
-            ${teamDeviation > 0 
-              ? `Las incidencias sistémicas afectaron negativamente la satisfacción en un <strong>${Math.abs(teamDeviation)}%</strong>. Al excluir estos eventos, el rendimiento real del equipo es superior.` 
-              : `El Escenario B muestra un rendimiento ${Math.abs(teamDeviation)}% inferior, lo que podría indicar problemas adicionales más allá de las incidencias registradas.`
-            }
-          </p>
-        </div>
-      ` : ''}
-    `;
-
-    content.innerHTML = html;
   }
 };
 
