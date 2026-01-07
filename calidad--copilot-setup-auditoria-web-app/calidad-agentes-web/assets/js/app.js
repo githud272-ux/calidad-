@@ -785,7 +785,15 @@ const App = {
 
     const filterTeamStats = document.getElementById('filterTeamStats');
     if (filterTeamStats) {
-      filterTeamStats.addEventListener('change', () => this.loadStatistics());
+      filterTeamStats.addEventListener('change', () => {
+        this.updateAgentStatsFilter();
+        this.loadStatistics();
+      });
+    }
+
+    const filterAgentStats = document.getElementById('filterAgentStats');
+    if (filterAgentStats) {
+      filterAgentStats.addEventListener('change', () => this.loadStatistics());
     }
 
     // Team quality selector for dashboard
@@ -6417,6 +6425,50 @@ const App = {
         filterTeamStats.disabled = false;
       }
     }
+
+    // Initialize agent filter with empty state
+    this.updateAgentStatsFilter();
+  },
+
+  // Update agent filter based on selected team
+  updateAgentStatsFilter() {
+    const filterTeamStats = document.getElementById('filterTeamStats');
+    const filterAgentStats = document.getElementById('filterAgentStats');
+    const selectedTeam = filterTeamStats ? filterTeamStats.value : '';
+
+    if (!filterAgentStats) return;
+
+    // Clear existing options except the first one
+    while (filterAgentStats.options.length > 1) {
+      filterAgentStats.remove(1);
+    }
+
+    const teams = DataManager.getAllTeams();
+    let agents = [];
+
+    if (selectedTeam && teams[selectedTeam] && teams[selectedTeam].members) {
+      // Get agents from the selected team
+      agents = teams[selectedTeam].members.map(m => m.name).sort();
+    } else {
+      // Get all agents from all teams
+      Object.values(teams).forEach(team => {
+        if (team.members) {
+          team.members.forEach(m => {
+            if (!agents.includes(m.name)) {
+              agents.push(m.name);
+            }
+          });
+        }
+      });
+      agents.sort();
+    }
+
+    agents.forEach(agentName => {
+      const option = document.createElement('option');
+      option.value = agentName;
+      option.textContent = agentName;
+      filterAgentStats.appendChild(option);
+    });
   },
 
   loadStatistics() {
@@ -6442,23 +6494,38 @@ const App = {
 
     const filterTeamStats = document.getElementById('filterTeamStats');
     const selectedTeam = filterTeamStats ? filterTeamStats.value : '';
+    
+    const filterAgentStats = document.getElementById('filterAgentStats');
+    const selectedAgent = filterAgentStats ? filterAgentStats.value : '';
 
     let stats;
     let teamName = 'Todos los Equipos';
+    let displayName = '';
     const teams = DataManager.getAllTeams();
 
+    // Get audits based on filters
+    let audits;
     if (selectedTeam) {
-      const teamAudits = DataManager.getAuditsForStatistics(year, monthIndex, selectedTeam);
-      stats = DataManager.calculateAuditStatistics(teamAudits);
+      audits = DataManager.getAuditsForStatistics(year, monthIndex, selectedTeam);
       teamName = teams[selectedTeam] ? teams[selectedTeam].name : selectedTeam;
     } else {
-      stats = DataManager.getGlobalStatistics(year, monthIndex);
+      audits = DataManager.getAuditsForStatistics(year, monthIndex, null);
     }
 
-    this.renderStatistics(stats, monthName, year, teamName, selectedTeam);
+    // Filter by specific agent if selected
+    if (selectedAgent) {
+      audits = audits.filter(a => a.agentName === selectedAgent);
+      displayName = `${selectedAgent} - ${teamName}`;
+    } else {
+      displayName = teamName;
+    }
+
+    stats = DataManager.calculateAuditStatistics(audits);
+
+    this.renderStatistics(stats, monthName, year, displayName, selectedTeam, selectedAgent);
   },
 
-  renderStatistics(stats, monthName, year, teamName, teamId) {
+  renderStatistics(stats, monthName, year, teamName, teamId, selectedAgent) {
     const container = document.getElementById('statisticsContainer');
     const teams = DataManager.getAllTeams();
 
@@ -6467,7 +6534,6 @@ const App = {
         <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
           <i class="fas fa-inbox" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
           <p>No hay auditorías registradas para ${monthName} ${year} en ${teamName}</p>
-          <p style="font-size: 0.85rem; margin-top: 0.5rem;">Las estadísticas se reinician cada mes</p>
         </div>
       `;
       return;
@@ -6479,9 +6545,6 @@ const App = {
         <h3 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem 0; color: var(--text-primary);">
           <i class="fas fa-chart-pie"></i> Estadísticas - ${monthName} ${year} - ${teamName}
         </h3>
-        <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0;">
-          <strong>Nota:</strong> Las estadísticas se reinician mensualmente. Mostrando datos del mes seleccionado.
-        </p>
       </div>
 
       <!-- Summary Cards -->
@@ -6495,12 +6558,14 @@ const App = {
           <div style="font-size: 2rem; font-weight: 700;">${stats.averageScore}%</div>
         </div>
         <div style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; padding: 1.25rem; border-radius: 0.75rem;">
-          <div style="font-size: 0.85rem; opacity: 0.9;">Fallos en Empatía</div>
-          <div style="font-size: 2rem; font-weight: 700;">${Math.round((stats.pillarDeficiencies.empatia / stats.totalAudits) * 100)}%</div>
+          <div style="font-size: 0.85rem; opacity: 0.9;">Auditorías c/Fallo Empatía</div>
+          <div style="font-size: 2rem; font-weight: 700;">${stats.pillarDeficiencies.empatia}</div>
+          <div style="font-size: 0.75rem; opacity: 0.8;">${Math.round((stats.pillarDeficiencies.empatia / stats.totalAudits) * 100)}% del total</div>
         </div>
         <div style="background: linear-gradient(135deg, #ef4444, #b91c1c); color: white; padding: 1.25rem; border-radius: 0.75rem;">
-          <div style="font-size: 0.85rem; opacity: 0.9;">Fallos en Gestión</div>
-          <div style="font-size: 2rem; font-weight: 700;">${Math.round((stats.pillarDeficiencies.gestion / stats.totalAudits) * 100)}%</div>
+          <div style="font-size: 0.85rem; opacity: 0.9;">Auditorías c/Fallo Gestión</div>
+          <div style="font-size: 2rem; font-weight: 700;">${stats.pillarDeficiencies.gestion}</div>
+          <div style="font-size: 0.75rem; opacity: 0.8;">${Math.round((stats.pillarDeficiencies.gestion / stats.totalAudits) * 100)}% del total</div>
         </div>
       </div>
 
@@ -6618,54 +6683,6 @@ const App = {
             ${stats.agentsByPillarIssue.gestion.length > 5 ? `<p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">+${stats.agentsByPillarIssue.gestion.length - 5} agentes más</p>` : ''}
           ` : '<p style="color: var(--text-muted); text-align: center;">No hay agentes con deficiencias significativas en gestión</p>'}
         </div>
-      </div>
-    `;
-
-    // Tipificación Impact Analysis
-    const tipificaciones = Object.entries(stats.tipificacionImpact)
-      .sort((a, b) => b[1].count - a[1].count)
-      .slice(0, 10);
-
-    html += `
-      <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem;">
-        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #0369a1;">
-          <i class="fas fa-tags" style="color: #0ea5e9;"></i> Impacto por Motivo de Contacto (Tipificación)
-        </h4>
-        ${tipificaciones.length > 0 ? `
-          <div class="table-scroll">
-            <table class="data-table" style="font-size: 0.85rem; margin: 0;">
-              <thead>
-                <tr style="background: #f0f9ff;">
-                  <th>Tipificación</th>
-                  <th style="text-align: center;">Auditorías</th>
-                  <th style="text-align: center;">% del Total</th>
-                  <th style="text-align: center;">Prom. Calidad</th>
-                  <th style="text-align: center;">% con Deficiencias</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${tipificaciones.map(([tip, data]) => `
-                  <tr>
-                    <td><strong>${tip}</strong></td>
-                    <td style="text-align: center;">${data.count}</td>
-                    <td style="text-align: center;">
-                      <div style="display: flex; align-items: center; gap: 0.5rem; justify-content: center;">
-                        <div style="width: 60px; height: 8px; background: #e0f2fe; border-radius: 4px; overflow: hidden;">
-                          <div style="width: ${data.impactPercentage}%; height: 100%; background: #0ea5e9;"></div>
-                        </div>
-                        <span>${data.impactPercentage}%</span>
-                      </div>
-                    </td>
-                    <td style="text-align: center; font-weight: 600; color: ${data.averageScore >= 80 ? '#16a34a' : data.averageScore >= 60 ? '#d97706' : '#dc2626'};">${data.averageScore}%</td>
-                    <td style="text-align: center;">
-                      <span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; font-weight: 600; background: ${data.deficiencyPercentage >= 30 ? '#fee2e2' : data.deficiencyPercentage >= 15 ? '#fef3c7' : '#dcfce7'}; color: ${data.deficiencyPercentage >= 30 ? '#dc2626' : data.deficiencyPercentage >= 15 ? '#d97706' : '#16a34a'};">${data.deficiencyPercentage}%</span>
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        ` : '<p style="color: var(--text-muted); text-align: center;">No hay datos de tipificación disponibles</p>'}
       </div>
     `;
 
