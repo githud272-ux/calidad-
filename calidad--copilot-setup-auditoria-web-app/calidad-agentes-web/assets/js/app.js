@@ -469,13 +469,15 @@ const App = {
 
       // Parse numeric values (handle comma as decimal separator)
       const tickets = parseInt(values[1]) || 0;
-      const ticketsBad = parseInt(values[2]) || 0;
-      const ticketsGood = parseInt(values[3]) || 0;
-      const firstResponse = parseFloat(values[4].replace(',', '.')) || 0;
-      const resolutionTime = parseFloat(values[5].replace(',', '.')) || 0;
+      const ticketsPerHourRaw = parseFloat(values[2].replace(',', '.')) || 0; // Promedio diario from Excel
+      const ticketsBad = parseInt(values[3]) || 0;
+      const ticketsGood = parseInt(values[4]) || 0;
+      const firstResponse = parseFloat(values[5].replace(',', '.')) || 0;
+      const resolutionTime = parseFloat(values[6].replace(',', '.')) || 0;
+      const firstResponseMinutes = values[7] ? parseFloat(values[7].replace(',', '.')) || 0 : 0;
 
-      // Calculate metrics
-      const ticketsPerHour = tickets > 0 ? tickets / 8 : 0; // Assume 8-hour shift
+      // Use the ticketsPerHour from Excel (promedio diario) if available, otherwise calculate
+      const ticketsPerHour = ticketsPerHourRaw > 0 ? ticketsPerHourRaw : (tickets > 0 ? tickets / 8 : 0);
       const califPct = (tickets > 0) ? ((ticketsGood / tickets) * 100) : 0;
 
       // Save según modo seleccionado
@@ -489,6 +491,7 @@ const App = {
         firstResponse,
         resolutionTime,
         ticketsPerHour,
+        firstResponseMinutes,
         califPct
       };
       if (excelImportMode === 'rango') {
