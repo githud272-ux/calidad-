@@ -1691,12 +1691,17 @@ const DataManager = {
           const startDate = new Date(weekInfo.startDate);
           const endDate = new Date(weekInfo.endDate);
           
-          for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-            const dateStr = d.toISOString().split('T')[0];
+          // Create a new date object for iteration to avoid mutation issues
+          let currentDate = new Date(startDate);
+          while (currentDate <= endDate) {
+            const dateStr = currentDate.toISOString().split('T')[0];
             if (incidentDatesByTeam[agentTeam].has(dateStr)) {
               hasIncidentInWeek = true;
               break;
             }
+            // Increment date safely
+            currentDate = new Date(currentDate);
+            currentDate.setDate(currentDate.getDate() + 1);
           }
           
           // If no incident in this week, include the data in Scenario B
