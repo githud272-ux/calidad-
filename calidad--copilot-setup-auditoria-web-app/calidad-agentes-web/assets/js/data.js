@@ -40,7 +40,9 @@ const DataManager = {
     AUDIT_VIEWS: 'calidad_audit_views',
     AUDIT_COMMENTS: 'calidad_audit_comments',
     ACTIVITY_LOG: 'calidad_activity_log',
-    CONNECTION_HOURS: 'calidad_connection_hours'
+    CONNECTION_HOURS: 'calidad_connection_hours',
+    INCIDENTS: 'calidad_incidents',
+    INCIDENT_TYPES: 'calidad_incident_types'
   },
 
   // Remove all persisted app data so every load starts clean
@@ -1520,6 +1522,215 @@ const DataManager = {
   getGlobalStatistics(year, month) {
     const audits = this.getAuditsForStatistics(year, month);
     return this.calculateAuditStatistics(audits);
+  },
+
+  // ===== INCIDENT MANAGEMENT =====
+  
+  // Get default incident types
+  getDefaultIncidentTypes() {
+    return [
+      'Caída Bancaria',
+      'Falla de App',
+      'Intermitencia Bancaria',
+      'Caída de Plataforma',
+      'Falla de Equipos'
+    ];
+  },
+
+  // Get all incident types (default + custom)
+  getAllIncidentTypes() {
+    const customTypes = JSON.parse(SafeStorage.getItem(this.STORAGE_KEYS.INCIDENT_TYPES) || '[]');
+    const defaultTypes = this.getDefaultIncidentTypes();
+    return [...new Set([...defaultTypes, ...customTypes])].sort();
+  },
+
+  // Add a new custom incident type
+  addIncidentType(type) {
+    if (!type || typeof type !== 'string') return false;
+    const trimmedType = type.trim();
+    if (!trimmedType) return false;
+    
+    const allTypes = this.getAllIncidentTypes();
+    if (allTypes.includes(trimmedType)) return false;
+    
+    const customTypes = JSON.parse(SafeStorage.getItem(this.STORAGE_KEYS.INCIDENT_TYPES) || '[]');
+    customTypes.push(trimmedType);
+    SafeStorage.setItem(this.STORAGE_KEYS.INCIDENT_TYPES, JSON.stringify(customTypes));
+    return true;
+  },
+
+  // Get all incidents
+  getAllIncidents() {
+    return JSON.parse(SafeStorage.getItem(this.STORAGE_KEYS.INCIDENTS) || '[]');
+  },
+
+  // Save a new incident
+  saveIncident(incidentData) {
+    const incidents = this.getAllIncidents();
+    const newIncident = {
+      id: this.generateId(),
+      date: incidentData.date,
+      type: incidentData.type,
+      affectedTeams: incidentData.affectedTeams || [], // Array of team IDs
+      description: incidentData.description || '',
+      createdAt: new Date().toISOString(),
+      createdBy: incidentData.createdBy || null
+    };
+    incidents.push(newIncident);
+    SafeStorage.setItem(this.STORAGE_KEYS.INCIDENTS, JSON.stringify(incidents));
+    return newIncident;
+  },
+
+  // Update an incident
+  updateIncident(id, incidentData) {
+    const incidents = this.getAllIncidents();
+    const index = incidents.findIndex(inc => inc.id === id);
+    if (index !== -1) {
+      incidents[index] = {
+        ...incidents[index],
+        ...incidentData,
+        updatedAt: new Date().toISOString()
+      };
+      SafeStorage.setItem(this.STORAGE_KEYS.INCIDENTS, JSON.stringify(incidents));
+      return incidents[index];
+    }
+    return null;
+  },
+
+  // Delete an incident
+  deleteIncident(id) {
+    const incidents = this.getAllIncidents();
+    const filtered = incidents.filter(inc => inc.id !== id);
+    SafeStorage.setItem(this.STORAGE_KEYS.INCIDENTS, JSON.stringify(filtered));
+    return true;
+  },
+
+  // Get incidents for a specific team and date
+  getIncidentsForTeamAndDate(teamId, date) {
+    const incidents = this.getAllIncidents();
+    return incidents.filter(inc => 
+      inc.date === date && inc.affectedTeams.includes(teamId)
+    );
+  },
+
+  // Check if a date has incidents for a team
+  hasIncidentOnDate(teamId, date) {
+    return this.getIncidentsForTeamAndDate(teamId, date).length > 0;
+  },
+
+  // Calculate CSAT with two scenarios: Real (A) and Adjusted (B)
+  calculateCSATScenarios(year, month, teamId = null) {
+    const weeklyData = this.getWeeklyMetricsData(year, month);
+    const weekConfig = this.ensureWeekConfig(year, month);
+    const incidents = this.getAllIncidents();
+    
+    // Build set of dates with incidents for each team
+    const incidentDatesByTeam = {};
+    incidents.forEach(inc => {
+      inc.affectedTeams.forEach(team => {
+        if (!incidentDatesByTeam[team]) {
+          incidentDatesByTeam[team] = new Set();
+        }
+        incidentDatesByTeam[team].add(inc.date);
+      });
+    });
+
+    const scenarioA = {}; // Real: all data
+    const scenarioB = {}; // Adjusted: excluding incident days
+    
+    // Get all agents
+    const teams = this.getAllTeams();
+    let agentsToProcess = [];
+    
+    if (teamId) {
+      // Process only specified team
+      const team = teams[teamId];
+      if (team && team.members) {
+        agentsToProcess = team.members.map(m => ({ ...m, teamId }));
+      }
+    } else {
+      // Process all teams
+      Object.keys(teams).forEach(tid => {
+        if (teams[tid].members) {
+          teams[tid].members.forEach(m => {
+            agentsToProcess.push({ ...m, teamId: tid });
+          });
+        }
+      });
+    }
+
+    agentsToProcess.forEach(agent => {
+      const agentName = agent.name;
+      const agentTeam = agent.teamId;
+      const agentData = weeklyData[agentName];
+      
+      if (!agentData) return;
+
+      // Initialize scenarios for this agent
+      scenarioA[agentName] = { totalTickets: 0, totalGood: 0, csat: null, teamId: agentTeam };
+      scenarioB[agentName] = { totalTickets: 0, totalGood: 0, csat: null, teamId: agentTeam };
+
+      // Process each week
+      Object.keys(agentData).forEach(weekKey => {
+        const weekData = agentData[weekKey];
+        const tickets = weekData.tickets || 0;
+        const ticketsGood = weekData.ticketsGood || 0;
+        
+        // Scenario A: Include all data
+        scenarioA[agentName].totalTickets += tickets;
+        scenarioA[agentName].totalGood += ticketsGood;
+
+        // Scenario B: Check if this week has incident days for this agent's team
+        // Get the week date range
+        const weekIndex = parseInt(weekKey);
+        const weekInfo = weekConfig[weekIndex];
+        
+        if (weekInfo && incidentDatesByTeam[agentTeam]) {
+          // Check if any day in this week has an incident
+          let hasIncidentInWeek = false;
+          const startDate = new Date(weekInfo.startDate);
+          const endDate = new Date(weekInfo.endDate);
+          
+          // Create a new date object for iteration to avoid mutation issues
+          let currentDate = new Date(startDate);
+          while (currentDate <= endDate) {
+            const dateStr = currentDate.toISOString().split('T')[0];
+            if (incidentDatesByTeam[agentTeam].has(dateStr)) {
+              hasIncidentInWeek = true;
+              break;
+            }
+            // Increment date safely
+            currentDate = new Date(currentDate);
+            currentDate.setDate(currentDate.getDate() + 1);
+          }
+          
+          // If no incident in this week, include the data in Scenario B
+          if (!hasIncidentInWeek) {
+            scenarioB[agentName].totalTickets += tickets;
+            scenarioB[agentName].totalGood += ticketsGood;
+          }
+        } else {
+          // No incidents for this team, include in Scenario B
+          scenarioB[agentName].totalTickets += tickets;
+          scenarioB[agentName].totalGood += ticketsGood;
+        }
+      });
+
+      // Calculate CSAT percentages
+      if (scenarioA[agentName].totalTickets > 0) {
+        scenarioA[agentName].csat = Math.round(
+          (scenarioA[agentName].totalGood / scenarioA[agentName].totalTickets) * 100
+        );
+      }
+      
+      if (scenarioB[agentName].totalTickets > 0) {
+        scenarioB[agentName].csat = Math.round(
+          (scenarioB[agentName].totalGood / scenarioB[agentName].totalTickets) * 100
+        );
+      }
+    });
+
+    return { scenarioA, scenarioB };
   }
 };
 

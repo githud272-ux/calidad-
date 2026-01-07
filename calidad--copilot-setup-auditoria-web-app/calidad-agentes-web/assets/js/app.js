@@ -1484,6 +1484,10 @@ const App = {
         this.initializeStatisticsFilters();
         this.loadStatistics();
         break;
+      case 'incidents':
+        document.getElementById('incidentsView').classList.remove('hidden');
+        this.loadIncidentsView();
+        break;
     }
   },
 
@@ -7427,6 +7431,390 @@ const App = {
       'gestion-herramientas': 'Herramientas'
     };
     return names[category] || category;
+  },
+
+  // ===== INCIDENTS VIEW =====
+
+  loadIncidentsView() {
+    this.loadIncidentTypes();
+    this.loadTeamCheckboxes();
+    this.loadIncidentsList();
+    this.setupIncidentFormHandlers();
+    this.setupCSATScenariosHandlers();
+  },
+
+  loadIncidentTypes() {
+    const types = DataManager.getAllIncidentTypes();
+    const select = document.getElementById('incidentType');
+    select.innerHTML = '<option value="">Seleccionar tipo...</option>' +
+      types.map(type => `<option value="${type}">${type}</option>`).join('');
+  },
+
+  loadTeamCheckboxes() {
+    const teams = DataManager.TEAMS;
+    const container = document.getElementById('incidentTeamsCheckboxes');
+    container.innerHTML = teams.map(team => `
+      <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: white; border-radius: 0.5rem; cursor: pointer;">
+        <input type="checkbox" name="affectedTeam" value="${team.id}" style="cursor: pointer;">
+        <span style="font-weight: 600; color: ${team.color};">${team.name}</span>
+      </label>
+    `).join('');
+
+    // Also populate team selects for CSAT scenarios
+    const teamSelect = document.getElementById('csatScenarioTeam');
+    teamSelect.innerHTML = '<option value="">Todos los Equipos</option>' +
+      teams.map(team => `<option value="${team.id}">${team.name}</option>`).join('');
+  },
+
+  setupIncidentFormHandlers() {
+    // Add new incident type
+    document.getElementById('addIncidentTypeBtn').addEventListener('click', () => {
+      const newType = prompt('Ingrese el nuevo tipo de incidencia:');
+      if (newType && newType.trim()) {
+        const added = DataManager.addIncidentType(newType.trim());
+        if (added) {
+          this.loadIncidentTypes();
+          alert('Tipo de incidencia agregado exitosamente');
+        } else {
+          alert('Este tipo de incidencia ya existe');
+        }
+      }
+    });
+
+    // Handle form submission
+    document.getElementById('incidentForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      
+      const date = document.getElementById('incidentDate').value;
+      const type = document.getElementById('incidentType').value;
+      const description = document.getElementById('incidentDescription').value;
+      
+      const affectedTeams = Array.from(
+        document.querySelectorAll('input[name="affectedTeam"]:checked')
+      ).map(cb => cb.value);
+
+      if (!date || !type) {
+        alert('Por favor complete los campos obligatorios');
+        return;
+      }
+
+      if (affectedTeams.length === 0) {
+        alert('Por favor seleccione al menos un equipo afectado');
+        return;
+      }
+
+      const user = DataManager.getCurrentUser();
+      const incident = DataManager.saveIncident({
+        date,
+        type,
+        affectedTeams,
+        description,
+        createdBy: user ? user.email : null
+      });
+
+      alert('Incidencia registrada exitosamente');
+      
+      // Reset form
+      document.getElementById('incidentForm').reset();
+      document.querySelectorAll('input[name="affectedTeam"]').forEach(cb => cb.checked = false);
+      
+      // Reload list
+      this.loadIncidentsList();
+    });
+  },
+
+  loadIncidentsList() {
+    const incidents = DataManager.getAllIncidents();
+    const container = document.getElementById('incidentsList');
+    
+    if (incidents.length === 0) {
+      container.innerHTML = '<p class="empty">No hay incidencias registradas</p>';
+      return;
+    }
+
+    // Sort by date descending
+    incidents.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    const teams = DataManager.TEAMS;
+    const getTeamName = (teamId) => {
+      const team = teams.find(t => t.id === teamId);
+      return team ? team.name : teamId;
+    };
+
+    container.innerHTML = `
+      <div style="display: grid; gap: 1rem;">
+        ${incidents.map(incident => {
+          const incidentDate = new Date(incident.date);
+          const formattedDate = incidentDate.toLocaleDateString('es-VE', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          });
+
+          return `
+            <div class="glass-mini" style="padding: 1rem;">
+              <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
+                <div style="flex: 1;">
+                  <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                    <span style="background: #fee2e2; color: #dc2626; padding: 0.25rem 0.75rem; border-radius: 0.375rem; font-size: 0.85rem; font-weight: 600;">
+                      ${incident.type}
+                    </span>
+                    <span style="color: var(--text-muted); font-size: 0.85rem;">
+                      <i class="fas fa-calendar"></i> ${formattedDate}
+                    </span>
+                  </div>
+                  <div style="margin-top: 0.5rem;">
+                    <strong style="font-size: 0.85rem; color: var(--text-primary);">Equipos Afectados:</strong>
+                    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem;">
+                      ${incident.affectedTeams.map(teamId => {
+                        const team = teams.find(t => t.id === teamId);
+                        return `
+                          <span style="background: ${team ? team.color + '22' : '#f3f4f6'}; color: ${team ? team.color : '#6b7280'}; padding: 0.25rem 0.75rem; border-radius: 0.375rem; font-size: 0.8rem; font-weight: 600;">
+                            ${getTeamName(teamId)}
+                          </span>
+                        `;
+                      }).join('')}
+                    </div>
+                  </div>
+                  ${incident.description ? `
+                    <div style="margin-top: 0.5rem; padding: 0.5rem; background: #f9fafb; border-radius: 0.375rem; font-size: 0.85rem; color: var(--text-muted);">
+                      ${incident.description}
+                    </div>
+                  ` : ''}
+                </div>
+                <button onclick="App.deleteIncident('${incident.id}')" class="btn-accent" style="background: #fee2e2; color: #dc2626; border: none; padding: 0.5rem;">
+                  <i class="fas fa-trash"></i>
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  },
+
+  deleteIncident(incidentId) {
+    if (!confirm('¿Está seguro de eliminar esta incidencia?')) return;
+    
+    DataManager.deleteIncident(incidentId);
+    this.loadIncidentsList();
+    alert('Incidencia eliminada exitosamente');
+  },
+
+  setupCSATScenariosHandlers() {
+    document.getElementById('calculateScenariosBtn').addEventListener('click', () => {
+      this.calculateAndDisplayCSATScenarios();
+    });
+  },
+
+  calculateAndDisplayCSATScenarios() {
+    const monthSelect = document.getElementById('csatScenarioMonth');
+    const teamSelect = document.getElementById('csatScenarioTeam');
+    
+    const monthValue = monthSelect.value;
+    const teamId = teamSelect.value || null;
+
+    if (!monthValue) {
+      alert('Por favor seleccione un mes');
+      return;
+    }
+
+    const { monthIndex, yearOverride } = this.parseSelectedMonthValue(monthValue);
+    if (monthIndex === null) {
+      alert('Mes inválido');
+      return;
+    }
+
+    const year = yearOverride || this.getEffectiveYearForMonth(monthIndex);
+    
+    const { scenarioA, scenarioB } = DataManager.calculateCSATScenarios(year, monthIndex, teamId);
+    
+    this.displayCSATScenariosResults(scenarioA, scenarioB, year, monthIndex, teamId);
+  },
+
+  displayCSATScenariosResults(scenarioA, scenarioB, year, month, teamId) {
+    const container = document.getElementById('csatScenariosResults');
+    
+    const agentNames = Object.keys(scenarioA);
+    
+    if (agentNames.length === 0) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+          <i class="fas fa-inbox" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+          <p>No hay datos de satisfacción para el mes y equipo seleccionados</p>
+        </div>
+      `;
+      return;
+    }
+
+    // Calculate overall statistics
+    let totalA_tickets = 0, totalA_good = 0;
+    let totalB_tickets = 0, totalB_good = 0;
+    
+    agentNames.forEach(name => {
+      totalA_tickets += scenarioA[name].totalTickets;
+      totalA_good += scenarioA[name].totalGood;
+      totalB_tickets += scenarioB[name].totalTickets;
+      totalB_good += scenarioB[name].totalGood;
+    });
+
+    const overallCSAT_A = totalA_tickets > 0 ? Math.round((totalA_good / totalA_tickets) * 100) : null;
+    const overallCSAT_B = totalB_tickets > 0 ? Math.round((totalB_good / totalB_tickets) * 100) : null;
+    const deviation = (overallCSAT_A !== null && overallCSAT_B !== null) 
+      ? (overallCSAT_B - overallCSAT_A).toFixed(1) 
+      : null;
+
+    // Sort agents by deviation (most positive improvement first)
+    const agentsWithDeviation = agentNames.map(name => {
+      const csatA = scenarioA[name].csat;
+      const csatB = scenarioB[name].csat;
+      const dev = (csatA !== null && csatB !== null) ? (csatB - csatA) : 0;
+      return { name, scenarioA: scenarioA[name], scenarioB: scenarioB[name], deviation: dev };
+    }).sort((a, b) => b.deviation - a.deviation);
+
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+    container.innerHTML = `
+      <!-- Overall Summary -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <div class="glass-mini" style="padding: 1.25rem; background: linear-gradient(135deg, #f3f4f6, #e5e7eb);">
+          <div style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.5rem;">
+            <i class="fas fa-chart-bar"></i> ESCENARIO A - Métrica Real
+          </div>
+          <div style="font-size: 2rem; font-weight: 800; color: var(--text-primary);">
+            ${overallCSAT_A !== null ? overallCSAT_A + '%' : 'N/A'}
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">
+            ${totalA_tickets} tickets totales
+          </div>
+        </div>
+
+        <div class="glass-mini" style="padding: 1.25rem; background: linear-gradient(135deg, #dbeafe, #bfdbfe);">
+          <div style="font-size: 0.85rem; font-weight: 600; color: #1e40af; margin-bottom: 0.5rem;">
+            <i class="fas fa-chart-line"></i> ESCENARIO B - Métrica Ajustada
+          </div>
+          <div style="font-size: 2rem; font-weight: 800; color: #1e3a8a;">
+            ${overallCSAT_B !== null ? overallCSAT_B + '%' : 'N/A'}
+          </div>
+          <div style="font-size: 0.8rem; color: #1e40af; margin-top: 0.25rem;">
+            ${totalB_tickets} tickets (sin días de incidencia)
+          </div>
+        </div>
+
+        <div class="glass-mini" style="padding: 1.25rem; background: linear-gradient(135deg, ${deviation > 0 ? '#dcfce7, #bbf7d0' : '#fee2e2, #fecaca'});">
+          <div style="font-size: 0.85rem; font-weight: 600; color: ${deviation > 0 ? '#15803d' : '#b91c1c'}; margin-bottom: 0.5rem;">
+            <i class="fas fa-exchange-alt"></i> Desviación
+          </div>
+          <div style="font-size: 2rem; font-weight: 800; color: ${deviation > 0 ? '#166534' : '#991b1b'};">
+            ${deviation !== null ? (deviation > 0 ? '+' : '') + deviation + '%' : 'N/A'}
+          </div>
+          <div style="font-size: 0.8rem; color: ${deviation > 0 ? '#15803d' : '#b91c1c'}; margin-top: 0.25rem;">
+            ${deviation > 0 ? 'Impacto negativo de incidencias' : deviation < 0 ? 'Mejora sin incidencias' : 'Sin cambio'}
+          </div>
+        </div>
+      </div>
+
+      <!-- Analysis Message -->
+      ${deviation !== null && Math.abs(deviation) > 0 ? `
+        <div class="glass-mini" style="padding: 1rem; margin-bottom: 1.5rem; background: ${Math.abs(deviation) >= 5 ? '#fef3c7' : '#f3f4f6'}; border-left: 4px solid ${Math.abs(deviation) >= 5 ? '#f59e0b' : '#6b7280'};">
+          <div style="display: flex; align-items: start; gap: 0.75rem;">
+            <i class="fas fa-info-circle" style="color: ${Math.abs(deviation) >= 5 ? '#d97706' : '#6b7280'}; font-size: 1.25rem; margin-top: 0.125rem;"></i>
+            <div style="flex: 1;">
+              <strong style="color: var(--text-primary);">Análisis de Desviación:</strong>
+              <p style="margin: 0.5rem 0 0 0; color: var(--text-muted); font-size: 0.9rem;">
+                ${Math.abs(deviation) >= 5 
+                  ? `Las incidencias registradas para ${monthNames[month]} ${year} tuvieron un impacto significativo de <strong>${Math.abs(deviation)}%</strong> en la satisfacción del equipo. Este análisis permite identificar agentes que manejaron mejor la crisis.`
+                  : `Las incidencias registradas tuvieron un impacto moderado de <strong>${Math.abs(deviation)}%</strong> en la satisfacción. Los agentes mantuvieron un rendimiento relativamente estable durante los eventos.`
+                }
+              </p>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Agent-by-Agent Comparison -->
+      <div class="glass-mini" style="padding: 1.25rem;">
+        <h3 style="font-size: 1.1rem; font-weight: 700; margin: 0 0 1rem 0;">
+          <i class="fas fa-users"></i> Comparación por Agente
+        </h3>
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 600;">Agente</th>
+                <th style="padding: 0.75rem; text-align: center; font-size: 0.85rem; font-weight: 600;">Escenario A (Real)</th>
+                <th style="padding: 0.75rem; text-align: center; font-size: 0.85rem; font-weight: 600;">Escenario B (Ajustado)</th>
+                <th style="padding: 0.75rem; text-align: center; font-size: 0.85rem; font-weight: 600;">Desviación</th>
+                <th style="padding: 0.75rem; text-align: center; font-size: 0.85rem; font-weight: 600;">Análisis</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${agentsWithDeviation.map(agent => {
+                const csatA = agent.scenarioA.csat;
+                const csatB = agent.scenarioB.csat;
+                const dev = agent.deviation;
+                
+                let analysisText = '';
+                let analysisColor = '';
+                
+                if (csatA === null || csatB === null) {
+                  analysisText = 'Sin datos';
+                  analysisColor = '#6b7280';
+                } else if (Math.abs(dev) < 2) {
+                  analysisText = 'Estable';
+                  analysisColor = '#16a34a';
+                } else if (dev > 0) {
+                  analysisText = 'Mejor sin incidencias';
+                  analysisColor = '#0891b2';
+                } else {
+                  analysisText = 'Afectado por incidencias';
+                  analysisColor = '#dc2626';
+                }
+
+                return `
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 0.75rem; font-weight: 600;">${agent.name}</td>
+                    <td style="padding: 0.75rem; text-align: center;">
+                      <div style="font-weight: 700; font-size: 1.1rem;">${csatA !== null ? csatA + '%' : 'N/A'}</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${agent.scenarioA.totalTickets} tickets</div>
+                    </td>
+                    <td style="padding: 0.75rem; text-align: center;">
+                      <div style="font-weight: 700; font-size: 1.1rem; color: #1e40af;">${csatB !== null ? csatB + '%' : 'N/A'}</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${agent.scenarioB.totalTickets} tickets</div>
+                    </td>
+                    <td style="padding: 0.75rem; text-align: center;">
+                      <span style="font-weight: 700; color: ${dev > 0 ? '#15803d' : dev < 0 ? '#b91c1c' : '#6b7280'}; font-size: 1.1rem;">
+                        ${csatA !== null && csatB !== null ? (dev > 0 ? '+' : '') + dev.toFixed(1) + '%' : 'N/A'}
+                      </span>
+                    </td>
+                    <td style="padding: 0.75rem; text-align: center;">
+                      <span style="color: ${analysisColor}; font-size: 0.85rem; font-weight: 600;">
+                        ${analysisText}
+                      </span>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Insights -->
+      <div class="glass-mini" style="padding: 1.25rem; margin-top: 1rem; background: #f0fdf4; border-left: 4px solid #22c55e;">
+        <div style="display: flex; align-items: start; gap: 0.75rem;">
+          <i class="fas fa-lightbulb" style="color: #16a34a; font-size: 1.25rem; margin-top: 0.125rem;"></i>
+          <div style="flex: 1;">
+            <strong style="color: #166534;">Uso de este Análisis:</strong>
+            <ul style="margin: 0.5rem 0 0 0; padding-left: 1.25rem; color: #15803d; font-size: 0.9rem; line-height: 1.6;">
+              <li><strong>Auditoría Selectiva:</strong> Identifique agentes que mantuvieron buenos números durante crisis (mejor manejo) vs. los más afectados (necesitan refuerzo en trato bajo presión).</li>
+              <li><strong>Protección del Agente:</strong> Evite que agentes de fin de semana (menor volumen) vean su promedio destruido por eventos de un solo día.</li>
+              <li><strong>Toma de Decisiones:</strong> Use el Escenario B como métrica proyectada para evaluaciones más justas del desempeño real del agente.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    `;
   }
 };
 
