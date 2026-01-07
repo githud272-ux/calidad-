@@ -1410,6 +1410,7 @@ const DataManager = {
 
     // Agent rankings by average score
     stats.agentRankings = Object.entries(stats.agentDeficiencies)
+      .filter(([, data]) => data.totalAudits > 0)
       .map(([name, data]) => ({
         name,
         totalAudits: data.totalAudits,
