@@ -40,7 +40,8 @@ const DataManager = {
     AUDIT_VIEWS: 'calidad_audit_views',
     AUDIT_COMMENTS: 'calidad_audit_comments',
     ACTIVITY_LOG: 'calidad_activity_log',
-    CONNECTION_HOURS: 'calidad_connection_hours'
+    CONNECTION_HOURS: 'calidad_connection_hours',
+    INCIDENTS: 'calidad_incidents'
   },
 
   // Remove all persisted app data so every load starts clean
@@ -1512,6 +1513,60 @@ const DataManager = {
   getGlobalStatistics(year, month) {
     const audits = this.getAuditsForStatistics(year, month);
     return this.calculateAuditStatistics(audits);
+  },
+
+  // ==================== INCIDENT MANAGEMENT ====================
+  
+  // Get all incidents
+  getAllIncidents() {
+    return JSON.parse(SafeStorage.getItem(this.STORAGE_KEYS.INCIDENTS) || '[]');
+  },
+
+  // Save an incident
+  // incident: { id, date, type, teams: [], description, createdAt }
+  saveIncident(incident) {
+    const incidents = this.getAllIncidents();
+    const existingIndex = incidents.findIndex(i => i.id === incident.id);
+    
+    if (existingIndex >= 0) {
+      incidents[existingIndex] = incident;
+    } else {
+      incident.id = this.generateId();
+      incident.createdAt = new Date().toISOString();
+      incidents.push(incident);
+    }
+    
+    SafeStorage.setItem(this.STORAGE_KEYS.INCIDENTS, JSON.stringify(incidents));
+    return incident;
+  },
+
+  // Delete an incident
+  deleteIncident(incidentId) {
+    const incidents = this.getAllIncidents();
+    const filtered = incidents.filter(i => i.id !== incidentId);
+    SafeStorage.setItem(this.STORAGE_KEYS.INCIDENTS, JSON.stringify(filtered));
+  },
+
+  // Check if a specific date has incidents for a team
+  hasIncidentForDate(date, teamId) {
+    const incidents = this.getAllIncidents();
+    return incidents.some(incident => 
+      incident.date === date && 
+      incident.teams.includes(teamId)
+    );
+  },
+
+  // Get incidents for a specific date
+  getIncidentsForDate(date) {
+    const incidents = this.getAllIncidents();
+    return incidents.filter(incident => incident.date === date);
+  },
+
+  // Get all incident types (for dropdown/autocomplete)
+  getIncidentTypes() {
+    const incidents = this.getAllIncidents();
+    const types = [...new Set(incidents.map(i => i.type).filter(Boolean))];
+    return types.sort();
   }
 };
 

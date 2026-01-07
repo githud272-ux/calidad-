@@ -120,6 +120,10 @@
             <i class="fas fa-chart-pie"></i>
             <span>Estadísticas</span>
           </button>
+          <button class="nav-btn only-editor" data-view="incidents">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>Control de Incidencias</span>
+          </button>
           <button class="nav-btn only-editor" data-view="teams">
             <i class="fas fa-users"></i>
             <span>Gestión de Equipos</span>
@@ -490,6 +494,53 @@
                 <i class="fas fa-clock" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
                 <p>Seleccione un mes para ver las horas de conexión</p>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Incidents View -->
+        <div id="incidentsView" class="view-section hidden">
+          <div class="glass" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+              <div>
+                <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0 0 0.25rem 0;">
+                  <i class="fas fa-exclamation-triangle"></i> Control de Incidencias de Equipo
+                </h2>
+                <p style="color: var(--text-muted); margin: 0;">
+                  Registra eventos externos que afectan la satisfacción (CSAT) de los agentes
+                </p>
+              </div>
+              <button id="addIncidentBtn" class="btn-accent" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; cursor: pointer;">
+                <i class="fas fa-plus"></i> Registrar Incidencia
+              </button>
+            </div>
+
+            <!-- Info Banner -->
+            <div style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(217, 119, 6, 0.05)); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 0.75rem; padding: 1rem; margin-bottom: 1.5rem;">
+              <p style="color: var(--text-primary); font-size: 0.9rem; line-height: 1.6; margin: 0;">
+                <i class="fas fa-info-circle" style="color: #f59e0b; margin-right: 0.5rem;"></i>
+                <strong>Propósito:</strong> Las incidencias registradas aquí se excluirán automáticamente de los cálculos de satisfacción en el <strong>Escenario B (Métrica Ajustada)</strong> para mostrar el rendimiento real del agente sin eventos sistémicos.
+              </p>
+            </div>
+
+            <!-- Incidents Table -->
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th style="width: 120px;">Fecha</th>
+                    <th>Tipo de Incidencia</th>
+                    <th>Equipos Afectados</th>
+                    <th>Descripción</th>
+                    <th style="width: 100px;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="incidentsTableBody">
+                  <tr>
+                    <td colspan="5" class="empty">No hay incidencias registradas</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -1164,6 +1215,96 @@
           <i class="fas fa-times"></i> Cancelar
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Incident Modal -->
+  <div id="incidentModal" class="overlay hidden">
+    <div class="overlay-card glass" style="max-width: 700px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0;">
+          <i class="fas fa-exclamation-triangle"></i> <span id="incidentModalTitle">Registrar Incidencia</span>
+        </h2>
+        <button id="closeIncidentModalBtn" class="btn-mini" style="border: none; background: #f3f4f6;">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <form id="incidentForm">
+        <div style="display: grid; gap: 1.25rem;">
+          
+          <!-- Date -->
+          <div>
+            <label class="label-small" for="incidentDate">
+              <i class="fas fa-calendar"></i> Fecha de la Incidencia *
+            </label>
+            <input 
+              type="date" 
+              id="incidentDate" 
+              class="input-dark" 
+              required
+            >
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0.25rem 0 0 0;">
+              El día completo será excluido de los cálculos de satisfacción
+            </p>
+          </div>
+
+          <!-- Type -->
+          <div>
+            <label class="label-small" for="incidentType">
+              <i class="fas fa-tag"></i> Tipo de Incidencia *
+            </label>
+            <input 
+              type="text" 
+              id="incidentType" 
+              class="input-dark" 
+              placeholder="Ej: Caída Bancaria, Falla de App, Intermitencia bancaria"
+              list="incidentTypesList"
+              required
+            >
+            <datalist id="incidentTypesList"></datalist>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0.25rem 0 0 0;">
+              Puede escribir un nuevo tipo o seleccionar uno existente
+            </p>
+          </div>
+
+          <!-- Teams -->
+          <div>
+            <label class="label-small">
+              <i class="fas fa-users"></i> Equipos Afectados *
+            </label>
+            <div id="incidentTeamsCheckboxes" style="display: grid; gap: 0.5rem; background: white; border-radius: 0.5rem; padding: 1rem; border: 1px solid #e5e7eb;">
+              <!-- Checkboxes will be generated dynamically -->
+            </div>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0.25rem 0 0 0;">
+              Seleccione uno o varios equipos afectados por esta incidencia
+            </p>
+          </div>
+
+          <!-- Description -->
+          <div>
+            <label class="label-small" for="incidentDescription">
+              <i class="fas fa-file-alt"></i> Descripción / Observación
+            </label>
+            <textarea 
+              id="incidentDescription" 
+              class="input-dark" 
+              rows="3"
+              placeholder="Detalle breve de lo ocurrido..."
+            ></textarea>
+          </div>
+
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
+          <button type="submit" class="btn-accent" style="flex: 1; background: linear-gradient(135deg, #f59e0b, #d97706); color: white; border: none; cursor: pointer;">
+            <i class="fas fa-save"></i> Guardar Incidencia
+          </button>
+          <button type="button" id="cancelIncidentBtn" class="btn-accent" style="flex: 1; background: #e5e7eb; color: var(--text-primary); border: none; cursor: pointer;">
+            <i class="fas fa-times"></i> Cancelar
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 

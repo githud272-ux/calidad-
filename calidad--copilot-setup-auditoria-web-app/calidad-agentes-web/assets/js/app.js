@@ -936,6 +936,34 @@ const App = {
       manualMetricsForm.addEventListener('submit', (e) => this.handleManualMetricsSubmit(e));
     }
 
+    // Incident modal
+    const addIncidentBtn = document.getElementById('addIncidentBtn');
+    const closeIncidentModalBtn = document.getElementById('closeIncidentModalBtn');
+    const cancelIncidentBtn = document.getElementById('cancelIncidentBtn');
+    if (addIncidentBtn) {
+      addIncidentBtn.addEventListener('click', () => this.openIncidentModal());
+    }
+    if (closeIncidentModalBtn) {
+      closeIncidentModalBtn.addEventListener('click', () => this.closeIncidentModal());
+    }
+    if (cancelIncidentBtn) {
+      cancelIncidentBtn.addEventListener('click', () => this.closeIncidentModal());
+    }
+
+    const incidentForm = document.getElementById('incidentForm');
+    if (incidentForm) {
+      incidentForm.addEventListener('submit', (e) => this.handleIncidentSubmit(e));
+    }
+
+    const incidentModal = document.getElementById('incidentModal');
+    if (incidentModal) {
+      incidentModal.addEventListener('click', (e) => {
+        if (e.target === incidentModal) {
+          this.closeIncidentModal();
+        }
+      });
+    }
+
     // Add member modal
     const closeAddMemberBtn = document.getElementById('closeAddMemberBtn');
     const cancelAddMemberBtn = document.getElementById('cancelAddMemberBtn');
@@ -1385,6 +1413,10 @@ const App = {
         document.getElementById('statisticsView').classList.remove('hidden');
         this.initializeStatisticsFilters();
         this.loadStatistics();
+        break;
+      case 'incidents':
+        document.getElementById('incidentsView').classList.remove('hidden');
+        this.loadIncidentsView();
         break;
     }
   },
@@ -7277,6 +7309,185 @@ const App = {
       'gestion-herramientas': 'Herramientas'
     };
     return names[category] || category;
+  },
+
+  // ==================== INCIDENT MANAGEMENT ====================
+
+  loadIncidentsView() {
+    this.renderIncidentsTable();
+  },
+
+  renderIncidentsTable() {
+    const tbody = document.getElementById('incidentsTableBody');
+    const incidents = DataManager.getAllIncidents();
+
+    if (incidents.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">No hay incidencias registradas</td></tr>';
+      return;
+    }
+
+    // Sort by date descending (newest first)
+    incidents.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    const html = incidents.map(incident => {
+      const date = new Date(incident.date);
+      const formattedDate = date.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      
+      // Get team names
+      const teamNames = incident.teams.map(teamId => {
+        const team = DataManager.TEAMS.find(t => t.id === teamId);
+        return team ? team.name : teamId;
+      }).join(', ');
+
+      return `
+        <tr>
+          <td style="font-weight: 600;">${formattedDate}</td>
+          <td>
+            <span style="background: #fef3c7; color: #92400e; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.85rem; font-weight: 500;">
+              ${incident.type}
+            </span>
+          </td>
+          <td style="font-size: 0.85rem;">${teamNames}</td>
+          <td style="font-size: 0.85rem; color: var(--text-muted);">${incident.description || '—'}</td>
+          <td>
+            <div style="display: flex; gap: 0.5rem; justify-content: center;">
+              <button 
+                class="btn-mini" 
+                onclick="App.editIncident('${incident.id}')"
+                style="background: #dbeafe; color: #1e40af; border: none; cursor: pointer;"
+                title="Editar"
+              >
+                <i class="fas fa-edit"></i>
+              </button>
+              <button 
+                class="btn-mini" 
+                onclick="App.deleteIncident('${incident.id}')"
+                style="background: #fee2e2; color: #991b1b; border: none; cursor: pointer;"
+                title="Eliminar"
+              >
+                <i class="fas fa-trash"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    tbody.innerHTML = html;
+  },
+
+  openIncidentModal(incidentId = null) {
+    const modal = document.getElementById('incidentModal');
+    const form = document.getElementById('incidentForm');
+    const title = document.getElementById('incidentModalTitle');
+    const teamsContainer = document.getElementById('incidentTeamsCheckboxes');
+
+    // Reset form
+    form.reset();
+
+    // Populate existing incident types for datalist
+    const typesList = document.getElementById('incidentTypesList');
+    const existingTypes = DataManager.getIncidentTypes();
+    typesList.innerHTML = existingTypes.map(type => `<option value="${type}">`).join('');
+
+    // Generate team checkboxes
+    teamsContainer.innerHTML = DataManager.TEAMS.map(team => `
+      <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; padding: 0.5rem; border-radius: 0.25rem; transition: background 0.2s;">
+        <input 
+          type="checkbox" 
+          name="incidentTeam" 
+          value="${team.id}"
+          style="width: 1rem; height: 1rem; cursor: pointer;"
+        >
+        <div style="width: 12px; height: 12px; border-radius: 50%; background: ${team.color};"></div>
+        <span style="font-size: 0.9rem;">${team.name}</span>
+      </label>
+    `).join('');
+
+    // If editing, populate form with existing data
+    if (incidentId) {
+      const incidents = DataManager.getAllIncidents();
+      const incident = incidents.find(i => i.id === incidentId);
+      
+      if (incident) {
+        title.textContent = 'Editar Incidencia';
+        document.getElementById('incidentDate').value = incident.date;
+        document.getElementById('incidentType').value = incident.type;
+        document.getElementById('incidentDescription').value = incident.description || '';
+        
+        // Check the teams
+        incident.teams.forEach(teamId => {
+          const checkbox = teamsContainer.querySelector(`input[value="${teamId}"]`);
+          if (checkbox) checkbox.checked = true;
+        });
+
+        form.dataset.incidentId = incidentId;
+      }
+    } else {
+      title.textContent = 'Registrar Incidencia';
+      delete form.dataset.incidentId;
+    }
+
+    modal.classList.remove('hidden');
+  },
+
+  closeIncidentModal() {
+    document.getElementById('incidentModal').classList.add('hidden');
+  },
+
+  editIncident(incidentId) {
+    this.openIncidentModal(incidentId);
+  },
+
+  deleteIncident(incidentId) {
+    if (confirm('¿Está seguro de eliminar esta incidencia? Esta acción no se puede deshacer.')) {
+      DataManager.deleteIncident(incidentId);
+      this.renderIncidentsTable();
+      
+      // Refresh statistics if it's the current view
+      if (this.currentView === 'statistics') {
+        this.loadStatistics();
+      }
+    }
+  },
+
+  handleIncidentSubmit(e) {
+    e.preventDefault();
+    
+    const form = e.target;
+    const date = document.getElementById('incidentDate').value;
+    const type = document.getElementById('incidentType').value.trim();
+    const description = document.getElementById('incidentDescription').value.trim();
+    
+    // Get selected teams
+    const checkedTeams = Array.from(form.querySelectorAll('input[name="incidentTeam"]:checked'))
+      .map(cb => cb.value);
+
+    if (checkedTeams.length === 0) {
+      alert('Por favor, seleccione al menos un equipo afectado.');
+      return;
+    }
+
+    const incident = {
+      date,
+      type,
+      teams: checkedTeams,
+      description
+    };
+
+    // If editing, preserve the ID
+    if (form.dataset.incidentId) {
+      incident.id = form.dataset.incidentId;
+    }
+
+    DataManager.saveIncident(incident);
+    this.closeIncidentModal();
+    this.renderIncidentsTable();
+
+    // Refresh statistics if it's the current view
+    if (this.currentView === 'statistics') {
+      this.loadStatistics();
+    }
   }
 };
 
