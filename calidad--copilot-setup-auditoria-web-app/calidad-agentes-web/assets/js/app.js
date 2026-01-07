@@ -53,7 +53,7 @@ const App = {
     return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   },
 
-  // Set a day status quickly (Libre / Guardia) from UI
+  // Set a day status quickly (Libre / Guardia / Vacaciones / Clear) from UI
   setConnectionDayStatus(agentName, dateStr, status) {
     const yearFromDate = parseInt(dateStr.split('-')[0], 10);
     const monthIndex = parseInt(dateStr.split('-')[1], 10) - 1;
@@ -69,13 +69,197 @@ const App = {
       return;
     }
 
-    const hours = status === 'guardia' ? 'GUARDIA' : 'Libre';
+    // Handle clear/delete status
+    if (status === 'clear') {
+      DataManager.clearAgentDailyHours(agentName, yearFromDate, monthIndex, targetWeekIndex, dateStr);
+      const d = this.parseLocalDate(dateStr);
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      alert(`Estado borrado para ${agentName} en ${dd}/${mm}.`);
+      this.loadConnectionHours();
+      return;
+    }
+
+    // Get hours label based on status
+    const statusLabels = {
+      'guardia': 'GUARDIA',
+      'libre': 'Libre',
+      'vacaciones': 'VACACIONES'
+    };
+    const hours = statusLabels[status] || status.toUpperCase();
+    const statusDisplayNames = {
+      'guardia': 'GUARDIA',
+      'libre': 'LIBRE',
+      'vacaciones': 'VACACIONES'
+    };
+    
     DataManager.saveAgentDailyHours(agentName, yearFromDate, monthIndex, targetWeekIndex, dateStr, { status, hours });
     const d = this.parseLocalDate(dateStr);
     const dd = String(d.getDate()).padStart(2, '0');
     const mm = String(d.getMonth() + 1).padStart(2, '0');
-    alert(`${status === 'guardia' ? 'GUARDIA' : 'LIBRE'} marcado para ${agentName} en ${dd}/${mm}.`);
+    alert(`${statusDisplayNames[status] || status.toUpperCase()} marcado para ${agentName} en ${dd}/${mm}.`);
     this.loadConnectionHours();
+  },
+
+  // Open the connection status modal for advanced management
+  openConnectionStatusModal(agentName, dateStr) {
+    const modal = document.getElementById('connectionStatusModal');
+    if (!modal) return;
+
+    // Store agent and date in hidden fields
+    document.getElementById('statusModalAgent').value = agentName;
+    document.getElementById('statusModalDate').value = dateStr;
+
+    // Display info
+    const d = this.parseLocalDate(dateStr);
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    document.getElementById('statusModalInfo').textContent = `Agente: ${agentName}`;
+    document.getElementById('statusModalDateDisplay').textContent = `Fecha: ${dd}/${mm}/${yyyy}`;
+
+    // Reset form
+    document.getElementById('statusTypeSelect').value = '';
+    document.getElementById('statusNoteInput').value = '';
+    document.getElementById('extraHoursInput').value = '';
+    document.getElementById('cambioOptions').style.display = 'none';
+    document.getElementById('extraHoursOptions').style.display = 'none';
+
+    // Populate agents for cambio de guardia
+    this.populateCambioAgents(agentName);
+
+    modal.style.display = 'flex';
+  },
+
+  closeConnectionStatusModal() {
+    const modal = document.getElementById('connectionStatusModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  },
+
+  onStatusTypeChange() {
+    const statusType = document.getElementById('statusTypeSelect').value;
+    const cambioOptions = document.getElementById('cambioOptions');
+    const extraHoursOptions = document.getElementById('extraHoursOptions');
+
+    cambioOptions.style.display = statusType === 'cambio' ? 'block' : 'none';
+    extraHoursOptions.style.display = statusType === 'vacante' ? 'block' : 'none';
+  },
+
+  populateCambioAgents(excludeAgent) {
+    const select = document.getElementById('cambioAgentSelect');
+    if (!select) return;
+
+    // Get all agents from teams
+    const teams = DataManager.getAllTeams();
+    const agents = [];
+
+    Object.values(teams).forEach(team => {
+      if (team.agents) {
+        team.agents.forEach(agent => {
+          if (agent.name !== excludeAgent) {
+            agents.push({ name: agent.name, team: team.name });
+          }
+        });
+      }
+    });
+
+    // Sort by name
+    agents.sort((a, b) => a.name.localeCompare(b.name));
+
+    // Populate select
+    select.innerHTML = '<option value="">Seleccionar agente...</option>';
+    agents.forEach(agent => {
+      const option = document.createElement('option');
+      option.value = agent.name;
+      option.textContent = `${agent.name} (${agent.team})`;
+      select.appendChild(option);
+    });
+  },
+
+  saveConnectionStatus() {
+    const agentName = document.getElementById('statusModalAgent').value;
+    const dateStr = document.getElementById('statusModalDate').value;
+    const statusType = document.getElementById('statusTypeSelect').value;
+    const note = document.getElementById('statusNoteInput').value.trim();
+
+    if (!agentName || !dateStr) {
+      alert('Error: No se pudo identificar el agente o la fecha.');
+      return;
+    }
+
+    if (!statusType) {
+      alert('Por favor seleccione un tipo de estado.');
+      return;
+    }
+
+    const yearFromDate = parseInt(dateStr.split('-')[0], 10);
+    const monthIndex = parseInt(dateStr.split('-')[1], 10) - 1;
+    const weeks = DataManager.ensureWeekConfig(yearFromDate, monthIndex);
+    const targetWeekIndex = weeks.findIndex(w => w.startDate <= dateStr && dateStr <= w.endDate);
+
+    if (targetWeekIndex === -1) {
+      alert('La fecha seleccionada no pertenece a una semana configurada.');
+      return;
+    }
+
+    // Handle clear/delete
+    if (statusType === 'clear') {
+      DataManager.clearAgentDailyHours(agentName, yearFromDate, monthIndex, targetWeekIndex, dateStr);
+      this.closeConnectionStatusModal();
+      this.loadConnectionHours();
+      return;
+    }
+
+    // Build day data
+    const dayData = {
+      status: statusType,
+      hours: this.getStatusHoursLabel(statusType),
+      note: note || ''
+    };
+
+    // Handle cambio de guardia
+    if (statusType === 'cambio') {
+      const cambioAgent = document.getElementById('cambioAgentSelect').value;
+      if (!cambioAgent) {
+        alert('Por favor seleccione el agente con quien realizó el cambio.');
+        return;
+      }
+      dayData.cambioWith = cambioAgent;
+      // Also mark the other agent's day as cambio (they received this agent's shift)
+      DataManager.saveAgentDailyHours(cambioAgent, yearFromDate, monthIndex, targetWeekIndex, dateStr, {
+        status: 'cambio_recibido',
+        hours: 'CAMBIO',
+        cambioFrom: agentName,
+        note: `Recibió guardia de ${agentName}`
+      });
+    }
+
+    // Handle horas extra/vacante
+    if (statusType === 'vacante') {
+      const extraHours = parseFloat(document.getElementById('extraHoursInput').value) || 0;
+      dayData.extraHours = extraHours;
+      dayData.hours = 'VACANTE';
+    }
+
+    // Save the day data
+    DataManager.saveAgentDailyHours(agentName, yearFromDate, monthIndex, targetWeekIndex, dateStr, dayData);
+
+    this.closeConnectionStatusModal();
+    this.loadConnectionHours();
+  },
+
+  getStatusHoursLabel(status) {
+    const labels = {
+      'guardia': 'GUARDIA',
+      'libre': 'Libre',
+      'vacaciones': 'VACACIONES',
+      'cambio': 'CAMBIO',
+      'vacante': 'VACANTE',
+      'cambio_recibido': 'CAMBIO'
+    };
+    return labels[status] || status.toUpperCase();
   },
 
   // Observation Modal
@@ -285,13 +469,15 @@ const App = {
 
       // Parse numeric values (handle comma as decimal separator)
       const tickets = parseInt(values[1]) || 0;
-      const ticketsBad = parseInt(values[2]) || 0;
-      const ticketsGood = parseInt(values[3]) || 0;
-      const firstResponse = parseFloat(values[4].replace(',', '.')) || 0;
-      const resolutionTime = parseFloat(values[5].replace(',', '.')) || 0;
+      const ticketsPerHourRaw = parseFloat(values[2].replace(',', '.')) || 0; // Promedio diario from Excel
+      const ticketsBad = parseInt(values[3]) || 0;
+      const ticketsGood = parseInt(values[4]) || 0;
+      const firstResponse = parseFloat(values[5].replace(',', '.')) || 0;
+      const resolutionTime = parseFloat(values[6].replace(',', '.')) || 0;
+      const firstResponseMinutes = values[7] ? parseFloat(values[7].replace(',', '.')) || 0 : 0;
 
-      // Calculate metrics
-      const ticketsPerHour = tickets > 0 ? tickets / 8 : 0; // Assume 8-hour shift
+      // Use the ticketsPerHour from Excel (promedio diario) if available, otherwise calculate
+      const ticketsPerHour = ticketsPerHourRaw > 0 ? ticketsPerHourRaw : (tickets > 0 ? tickets / 8 : 0);
       const califPct = (tickets > 0) ? ((ticketsGood / tickets) * 100) : 0;
 
       // Save según modo seleccionado
@@ -305,6 +491,7 @@ const App = {
         firstResponse,
         resolutionTime,
         ticketsPerHour,
+        firstResponseMinutes,
         califPct
       };
       if (excelImportMode === 'rango') {
@@ -591,6 +778,25 @@ const App = {
     const filterTeamConnectionHours = document.getElementById('filterTeamConnectionHours');
     if (filterTeamConnectionHours) {
       filterTeamConnectionHours.addEventListener('change', () => this.loadConnectionHours());
+    }
+
+    // Statistics filters
+    const filterMonthStats = document.getElementById('filterMonthStats');
+    if (filterMonthStats) {
+      filterMonthStats.addEventListener('change', () => this.loadStatistics());
+    }
+
+    const filterTeamStats = document.getElementById('filterTeamStats');
+    if (filterTeamStats) {
+      filterTeamStats.addEventListener('change', () => {
+        this.updateAgentStatsFilter();
+        this.loadStatistics();
+      });
+    }
+
+    const filterAgentStats = document.getElementById('filterAgentStats');
+    if (filterAgentStats) {
+      filterAgentStats.addEventListener('change', () => this.loadStatistics());
     }
 
     // Team quality selector for dashboard
@@ -975,6 +1181,26 @@ const App = {
       this.populateMonthSelectors();
     }
 
+    // Show/hide statistics navigation for editors, supervisors, and analysts
+    const statsNavBtn = document.querySelectorAll('.nav-btn[data-view="statistics"]');
+    const canAccessStats = user.role === 'admin' || user.role === 'editor' || user.role === 'calidad' || user.role === 'supervisor' || user.role === 'analista';
+    statsNavBtn.forEach(el => {
+      el.style.display = canAccessStats ? 'flex' : 'none';
+    });
+
+    // Show/hide stats team filter based on role
+    const statsTeamFilter = document.querySelector('.stats-team-filter');
+    if (statsTeamFilter) {
+      if (user.role === 'admin' || user.role === 'editor' || user.role === 'calidad') {
+        statsTeamFilter.style.display = 'block';
+      } else if (user.role === 'supervisor' || user.role === 'analista') {
+        // Show filter for supervisors/analysts but they can change teams
+        statsTeamFilter.style.display = 'block';
+      } else {
+        statsTeamFilter.style.display = 'none';
+      }
+    }
+
     // Initialize team dropdowns
     this.initializeTeamFilters();
 
@@ -1082,6 +1308,11 @@ const App = {
         document.getElementById('connectionHoursView').classList.remove('hidden');
         this.initializeConnectionHoursFilters();
         this.loadConnectionHours();
+        break;
+      case 'statistics':
+        document.getElementById('statisticsView').classList.remove('hidden');
+        this.initializeStatisticsFilters();
+        this.loadStatistics();
         break;
     }
   },
@@ -3568,7 +3799,7 @@ const App = {
         <table class="data-table" style="font-size: 0.85rem;">
           <thead>
             <tr>
-              <th rowspan="2" style="vertical-align: middle; min-width: 150px;">Nombre del Agente</th>
+              <th rowspan="2" style="vertical-align: middle; min-width: 150px; position: sticky; left: 0; background: #f8fafc; z-index: 2;">Nombre del Agente</th>
               <th rowspan="2" style="vertical-align: middle; min-width: 100px; background: rgba(56, 206, 166, 0.1);">Turno</th>
     `;
     
@@ -3628,7 +3859,7 @@ const App = {
       const agentShift = this.getAgentShift(agentName, teams);
       const shiftBadge = this.getShiftBadge(agentShift);
       
-      tableHTML += `<tr><td><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
+      tableHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
       
       // Calculate monthly totals
       let monthlyTotals = {
@@ -3890,7 +4121,7 @@ const App = {
           <table class="data-table" style="font-size: 0.85rem; margin: 0;">
             <thead>
               <tr>
-                <th rowspan="2" style="vertical-align: middle; min-width: 150px;">Nombre del Agente</th>
+                <th rowspan="2" style="vertical-align: middle; min-width: 150px; position: sticky; left: 0; background: #f8fafc; z-index: 2;">Nombre del Agente</th>
                 <th rowspan="2" style="vertical-align: middle; min-width: 100px; background: rgba(56, 206, 166, 0.1);">Turno</th>
     `;
     
@@ -3950,7 +4181,7 @@ const App = {
       const agentShift = this.getAgentShift(agentName, teams);
       const shiftBadge = this.getShiftBadge(agentShift);
       
-      tableHTML += `<tr><td><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
+      tableHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong></td><td>${shiftBadge}</td>`;
       
       // Calculate monthly totals
       let monthlyTotals = {
@@ -5831,12 +6062,15 @@ const App = {
           return `<option value="${iso}">${label}</option>`;
         }).join('');
         const agentControls = isEditor ? `
-          <div style="margin-top: 4px; font-size: 0.8rem; opacity: 0.8; display: flex; gap: 6px; align-items: center;">
-            <select id="daySel-${weekIndex}-${sanitizedAgent}" class="input-dark" style="font-size: 0.75rem; padding: 2px 4px;">
+          <div style="margin-top: 4px; font-size: 0.8rem; opacity: 0.8; display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+            <select id="daySel-${weekIndex}-${sanitizedAgent}" class="input-dark" style="font-size: 0.75rem; padding: 2px 4px; max-width: 70px;">
               ${dayOptions}
             </select>
-            <span title="Marcar Libre" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'libre')">😴</span>
-            <span title="Marcar Guardia" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'guardia')">🛡️</span>
+            <span title="Libre/Descanso" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'libre')">😴</span>
+            <span title="Guardia" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'guardia')">🛡️</span>
+            <span title="Vacaciones" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'vacaciones')">🏖️</span>
+            <span title="Editar (más opciones)" style="cursor: pointer; background: rgba(39, 40, 131, 0.1); padding: 2px 4px; border-radius: 4px;" onclick="App.openConnectionStatusModal('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value)">✏️</span>
+            <span title="Borrar Estado" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'clear')">🗑️</span>
           </div>
         ` : '';
 
@@ -6040,7 +6274,30 @@ const App = {
         let daysWorked = 0;
         let totalSeconds = 0;
         
-        teamHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong></td>`;
+        // Control buttons for editors
+        const sanitizedAgent = agentName.replace(/[^A-Za-z0-9_-]/g, '');
+        const dayOptions = weekDates.map(date => {
+          const yyyy = date.getFullYear();
+          const mm = String(date.getMonth() + 1).padStart(2, '0');
+          const dd = String(date.getDate()).padStart(2, '0');
+          const iso = `${yyyy}-${mm}-${dd}`;
+          const label = `${dd}/${mm}`;
+          return `<option value="${iso}">${label}</option>`;
+        }).join('');
+        const agentControls = isEditor ? `
+          <div style="margin-top: 4px; font-size: 0.8rem; opacity: 0.8; display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+            <select id="daySelTeam-${weekIndex}-${sanitizedAgent}" class="input-dark" style="font-size: 0.75rem; padding: 2px 4px; max-width: 70px;">
+              ${dayOptions}
+            </select>
+            <span title="Libre/Descanso" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySelTeam-${weekIndex}-${sanitizedAgent}').value, 'libre')">😴</span>
+            <span title="Guardia" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySelTeam-${weekIndex}-${sanitizedAgent}').value, 'guardia')">🛡️</span>
+            <span title="Vacaciones" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySelTeam-${weekIndex}-${sanitizedAgent}').value, 'vacaciones')">🏖️</span>
+            <span title="Editar (más opciones)" style="cursor: pointer; background: rgba(39, 40, 131, 0.1); padding: 2px 4px; border-radius: 4px;" onclick="App.openConnectionStatusModal('${agentName}', document.getElementById('daySelTeam-${weekIndex}-${sanitizedAgent}').value)">✏️</span>
+            <span title="Borrar Estado" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySelTeam-${weekIndex}-${sanitizedAgent}').value, 'clear')">🗑️</span>
+          </div>
+        ` : '';
+        
+        teamHTML += `<tr><td style="position: sticky; left: 0; background: white; z-index: 1;"><strong>${agentName}</strong>${agentControls}</td>`;
         
         // Add cell for each day
         weekDates.forEach(date => {
@@ -6159,6 +6416,463 @@ const App = {
         reason: reason
       });
     }
+  },
+
+  // Statistics Section Functions
+  initializeStatisticsFilters() {
+    const teams = DataManager.getAllTeams();
+    const userTeam = DataManager.getUserTeam();
+    const isEditor = DataManager.isEditor();
+    const hasSupervisorPerms = DataManager.hasSupervisorPermissions();
+
+    // Populate team filter
+    const filterTeamStats = document.getElementById('filterTeamStats');
+    if (filterTeamStats) {
+      // Clear existing options except the first one
+      while (filterTeamStats.options.length > 1) {
+        filterTeamStats.remove(1);
+      }
+
+      Object.values(teams).forEach(team => {
+        const option = document.createElement('option');
+        option.value = team.id;
+        option.textContent = team.name;
+        filterTeamStats.appendChild(option);
+      });
+
+      // For non-editor users, restrict to their team
+      if (!isEditor && !hasSupervisorPerms && userTeam) {
+        filterTeamStats.value = userTeam;
+        filterTeamStats.disabled = true;
+      } else if (hasSupervisorPerms && userTeam) {
+        filterTeamStats.value = userTeam;
+        filterTeamStats.disabled = false;
+      } else {
+        filterTeamStats.disabled = false;
+      }
+    }
+
+    // Initialize agent filter with empty state
+    this.updateAgentStatsFilter();
+  },
+
+  // Update agent filter based on selected team
+  updateAgentStatsFilter() {
+    const filterTeamStats = document.getElementById('filterTeamStats');
+    const filterAgentStats = document.getElementById('filterAgentStats');
+    const selectedTeam = filterTeamStats ? filterTeamStats.value : '';
+
+    if (!filterAgentStats) return;
+
+    // Clear existing options except the first one
+    while (filterAgentStats.options.length > 1) {
+      filterAgentStats.remove(1);
+    }
+
+    const teams = DataManager.getAllTeams();
+    let agents = [];
+
+    if (selectedTeam && teams[selectedTeam] && teams[selectedTeam].members) {
+      // Get agents from the selected team
+      agents = teams[selectedTeam].members.map(m => m.name).sort();
+    } else {
+      // Get all agents from all teams
+      Object.values(teams).forEach(team => {
+        if (team.members) {
+          team.members.forEach(m => {
+            if (!agents.includes(m.name)) {
+              agents.push(m.name);
+            }
+          });
+        }
+      });
+      agents.sort();
+    }
+
+    agents.forEach(agentName => {
+      const option = document.createElement('option');
+      option.value = agentName;
+      option.textContent = agentName;
+      filterAgentStats.appendChild(option);
+    });
+  },
+
+  loadStatistics() {
+    const filterMonthStats = document.getElementById('filterMonthStats');
+    const selectedMonth = filterMonthStats ? filterMonthStats.value : '';
+
+    if (!selectedMonth) {
+      const container = document.getElementById('statisticsContainer');
+      container.innerHTML = `
+        <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+          <i class="fas fa-chart-pie" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+          <p>Seleccione un mes para ver las estadísticas de auditorías</p>
+        </div>
+      `;
+      return;
+    }
+
+    const parsed = this.parseSelectedMonthValue(selectedMonth);
+    const monthIndex = parsed.monthIndex;
+    const year = parsed.yearOverride ?? this.getEffectiveYearForMonth(monthIndex);
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const monthName = monthNames[monthIndex];
+
+    const filterTeamStats = document.getElementById('filterTeamStats');
+    const selectedTeam = filterTeamStats ? filterTeamStats.value : '';
+    
+    const filterAgentStats = document.getElementById('filterAgentStats');
+    const selectedAgent = filterAgentStats ? filterAgentStats.value : '';
+
+    let stats;
+    let teamName = 'Todos los Equipos';
+    let displayName = '';
+    const teams = DataManager.getAllTeams();
+
+    // Get audits based on filters
+    let audits;
+    if (selectedTeam) {
+      audits = DataManager.getAuditsForStatistics(year, monthIndex, selectedTeam);
+      teamName = teams[selectedTeam] ? teams[selectedTeam].name : selectedTeam;
+    } else {
+      audits = DataManager.getAuditsForStatistics(year, monthIndex, null);
+    }
+
+    // Filter by specific agent if selected
+    if (selectedAgent) {
+      audits = audits.filter(a => a.agentName === selectedAgent);
+      displayName = `${selectedAgent} - ${teamName}`;
+    } else {
+      displayName = teamName;
+    }
+
+    stats = DataManager.calculateAuditStatistics(audits);
+
+    this.renderStatistics(stats, monthName, year, displayName, selectedTeam, selectedAgent);
+  },
+
+  renderStatistics(stats, monthName, year, teamName, teamId, selectedAgent) {
+    const container = document.getElementById('statisticsContainer');
+    const teams = DataManager.getAllTeams();
+
+    if (!stats || stats.totalAudits === 0) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+          <i class="fas fa-inbox" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+          <p>No hay auditorías registradas para ${monthName} ${year} en ${teamName}</p>
+        </div>
+      `;
+      return;
+    }
+
+    // Build the statistics HTML
+    let html = `
+      <div style="margin-bottom: 1.5rem;">
+        <h3 style="font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem 0; color: var(--text-primary);">
+          <i class="fas fa-chart-pie"></i> Estadísticas - ${monthName} ${year} - ${teamName}
+        </h3>
+      </div>
+
+      <!-- Summary Cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <div style="background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; padding: 1.25rem; border-radius: 0.75rem;">
+          <div style="font-size: 0.85rem; opacity: 0.9;">Total Auditorías</div>
+          <div style="font-size: 2rem; font-weight: 700;">${stats.totalAudits}</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #272883, #1e1f6a); color: white; padding: 1.25rem; border-radius: 0.75rem;">
+          <div style="font-size: 0.85rem; opacity: 0.9;">Promedio de Calidad</div>
+          <div style="font-size: 2rem; font-weight: 700;">${stats.averageScore}%</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #f59e0b, #d97706); color: white; padding: 1.25rem; border-radius: 0.75rem;">
+          <div style="font-size: 0.85rem; opacity: 0.9;">Auditorías c/Fallo Empatía</div>
+          <div style="font-size: 2rem; font-weight: 700;">${stats.pillarDeficiencies.empatia}</div>
+          <div style="font-size: 0.75rem; opacity: 0.8;">${Math.round((stats.pillarDeficiencies.empatia / stats.totalAudits) * 100)}% del total</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #ef4444, #b91c1c); color: white; padding: 1.25rem; border-radius: 0.75rem;">
+          <div style="font-size: 0.85rem; opacity: 0.9;">Auditorías c/Fallo Gestión</div>
+          <div style="font-size: 2rem; font-weight: 700;">${stats.pillarDeficiencies.gestion}</div>
+          <div style="font-size: 0.75rem; opacity: 0.8;">${Math.round((stats.pillarDeficiencies.gestion / stats.totalAudits) * 100)}% del total</div>
+        </div>
+      </div>
+
+      <!-- Score Distribution -->
+      <div style="background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: var(--text-primary);">
+          <i class="fas fa-chart-bar" style="color: #38CEA6;"></i> Distribución de Puntajes
+        </h4>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem;">
+          <div style="text-align: center; padding: 0.75rem; background: #dcfce7; border-radius: 0.5rem;">
+            <div style="font-size: 1.5rem; font-weight: 700; color: #16a34a;">${stats.scoreDistribution.excellent}</div>
+            <div style="font-size: 0.8rem; color: #166534;">Excelente (95%+)</div>
+            <div style="font-size: 0.75rem; color: #6b7280;">${Math.round((stats.scoreDistribution.excellent / stats.totalAudits) * 100)}%</div>
+          </div>
+          <div style="text-align: center; padding: 0.75rem; background: #dbeafe; border-radius: 0.5rem;">
+            <div style="font-size: 1.5rem; font-weight: 700; color: #2563eb;">${stats.scoreDistribution.good}</div>
+            <div style="font-size: 0.8rem; color: #1e40af;">Bueno (80-94%)</div>
+            <div style="font-size: 0.75rem; color: #6b7280;">${Math.round((stats.scoreDistribution.good / stats.totalAudits) * 100)}%</div>
+          </div>
+          <div style="text-align: center; padding: 0.75rem; background: #fef3c7; border-radius: 0.5rem;">
+            <div style="font-size: 1.5rem; font-weight: 700; color: #d97706;">${stats.scoreDistribution.regular}</div>
+            <div style="font-size: 0.8rem; color: #92400e;">Regular (60-79%)</div>
+            <div style="font-size: 0.75rem; color: #6b7280;">${Math.round((stats.scoreDistribution.regular / stats.totalAudits) * 100)}%</div>
+          </div>
+          <div style="text-align: center; padding: 0.75rem; background: #fee2e2; border-radius: 0.5rem;">
+            <div style="font-size: 1.5rem; font-weight: 700; color: #dc2626;">${stats.scoreDistribution.poor}</div>
+            <div style="font-size: 0.8rem; color: #991b1b;">Deficiente (<60%)</div>
+            <div style="font-size: 0.75rem; color: #6b7280;">${Math.round((stats.scoreDistribution.poor / stats.totalAudits) * 100)}%</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top Deficient Criteria -->
+      <div style="background: #fef3f2; border: 1px solid #fecaca; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #b91c1c;">
+          <i class="fas fa-exclamation-triangle"></i> Principales Deficiencias por Criterio
+        </h4>
+        ${stats.topDeficientCriteria.length > 0 ? `
+          <div class="table-scroll">
+            <table class="data-table" style="font-size: 0.85rem; margin: 0;">
+              <thead>
+                <tr style="background: #fff5f5;">
+                  <th>Criterio</th>
+                  <th>Categoría</th>
+                  <th>Fallos</th>
+                  <th>% de Auditorías</th>
+                  <th>Agentes Afectados</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${stats.topDeficientCriteria.map(criterion => `
+                  <tr>
+                    <td><strong>${criterion.name}</strong></td>
+                    <td><span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; background: ${criterion.category === 'empatia' ? '#dcfce7' : '#dbeafe'}; color: ${criterion.category === 'empatia' ? '#166534' : '#1e40af'};">${this.formatCategoryName(criterion.category)}</span></td>
+                    <td style="text-align: center; font-weight: 600; color: #dc2626;">${criterion.count}</td>
+                    <td style="text-align: center;">
+                      <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div style="flex: 1; height: 8px; background: #fee2e2; border-radius: 4px; overflow: hidden;">
+                          <div style="width: ${criterion.percentage}%; height: 100%; background: #ef4444;"></div>
+                        </div>
+                        <span style="font-weight: 600; color: #dc2626;">${criterion.percentage}%</span>
+                      </div>
+                    </td>
+                    <td style="font-size: 0.8rem; color: var(--text-muted);">${criterion.agents.slice(0, 3).join(', ')}${criterion.agents.length > 3 ? ` (+${criterion.agents.length - 3} más)` : ''}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : '<p style="color: var(--text-muted); text-align: center;">No hay deficiencias registradas</p>'}
+      </div>
+    `;
+
+    // Agents with Pillar Issues
+    html += `
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <!-- Empatía Issues -->
+        <div style="background: #fef3c7; border: 1px solid #fcd34d; border-radius: 0.75rem; padding: 1.25rem;">
+          <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #92400e;">
+            <i class="fas fa-heart" style="color: #f59e0b;"></i> Agentes con Deficiencias en Empatía
+          </h4>
+          ${stats.agentsByPillarIssue.empatia.length > 0 ? `
+            <div style="display: grid; gap: 0.5rem;">
+              ${stats.agentsByPillarIssue.empatia.slice(0, 5).map(agent => `
+                <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <strong>${agent.name}</strong>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">${agent.issueCount}/${agent.totalAudits} auditorías con fallos</div>
+                  </div>
+                  <span style="padding: 0.25rem 0.75rem; border-radius: 0.5rem; font-weight: 700; font-size: 0.9rem; background: #fef3c7; color: #92400e;">${agent.issueRate}%</span>
+                </div>
+              `).join('')}
+            </div>
+            ${stats.agentsByPillarIssue.empatia.length > 5 ? `<p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">+${stats.agentsByPillarIssue.empatia.length - 5} agentes más</p>` : ''}
+          ` : '<p style="color: var(--text-muted); text-align: center;">No hay agentes con deficiencias significativas en empatía</p>'}
+        </div>
+
+        <!-- Gestión Issues -->
+        <div style="background: #fee2e2; border: 1px solid #fca5a5; border-radius: 0.75rem; padding: 1.25rem;">
+          <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #991b1b;">
+            <i class="fas fa-cogs" style="color: #ef4444;"></i> Agentes con Deficiencias en Gestión
+          </h4>
+          ${stats.agentsByPillarIssue.gestion.length > 0 ? `
+            <div style="display: grid; gap: 0.5rem;">
+              ${stats.agentsByPillarIssue.gestion.slice(0, 5).map(agent => `
+                <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <strong>${agent.name}</strong>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">${agent.issueCount}/${agent.totalAudits} auditorías con fallos</div>
+                  </div>
+                  <span style="padding: 0.25rem 0.75rem; border-radius: 0.5rem; font-weight: 700; font-size: 0.9rem; background: #fee2e2; color: #991b1b;">${agent.issueRate}%</span>
+                </div>
+              `).join('')}
+            </div>
+            ${stats.agentsByPillarIssue.gestion.length > 5 ? `<p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">+${stats.agentsByPillarIssue.gestion.length - 5} agentes más</p>` : ''}
+          ` : '<p style="color: var(--text-muted); text-align: center;">No hay agentes con deficiencias significativas en gestión</p>'}
+        </div>
+      </div>
+    `;
+
+    // Agent Rankings
+    html += `
+      <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 0.75rem; padding: 1.25rem; margin-bottom: 1.5rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: #166534;">
+          <i class="fas fa-trophy" style="color: #22c55e;"></i> Ranking de Agentes
+        </h4>
+        ${stats.agentRankings.length > 0 ? `
+          <div class="table-scroll">
+            <table class="data-table" style="font-size: 0.85rem; margin: 0;">
+              <thead>
+                <tr style="background: #f0fdf4;">
+                  <th style="width: 50px;">#</th>
+                  <th>Agente</th>
+                  <th style="text-align: center;">Auditorías</th>
+                  <th style="text-align: center;">Prom. Calidad</th>
+                  <th style="text-align: center;">% Fallos Empatía</th>
+                  <th style="text-align: center;">% Fallos Gestión</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${stats.agentRankings.slice(0, 15).map((agent, index) => `
+                  <tr>
+                    <td style="text-align: center; font-weight: 700; color: ${index < 3 ? '#f59e0b' : 'var(--text-muted)'};">
+                      ${index < 3 ? ['🥇', '🥈', '🥉'][index] : (index + 1)}
+                    </td>
+                    <td><strong>${agent.name}</strong></td>
+                    <td style="text-align: center;">${agent.totalAudits}</td>
+                    <td style="text-align: center; font-weight: 600; color: ${agent.averageScore >= 90 ? '#16a34a' : agent.averageScore >= 80 ? '#0ea5e9' : agent.averageScore >= 60 ? '#d97706' : '#dc2626'};">${agent.averageScore}%</td>
+                    <td style="text-align: center;">
+                      <span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; background: ${agent.empatiaIssueRate === 0 ? '#dcfce7' : '#fef3c7'}; color: ${agent.empatiaIssueRate === 0 ? '#16a34a' : '#d97706'};">${agent.empatiaIssueRate}%</span>
+                    </td>
+                    <td style="text-align: center;">
+                      <span style="padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem; background: ${agent.gestionIssueRate === 0 ? '#dcfce7' : '#fee2e2'}; color: ${agent.gestionIssueRate === 0 ? '#16a34a' : '#dc2626'};">${agent.gestionIssueRate}%</span>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          ${stats.agentRankings.length > 15 ? `<p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem; text-align: center;">Mostrando top 15 de ${stats.agentRankings.length} agentes</p>` : ''}
+        ` : '<p style="color: var(--text-muted); text-align: center;">No hay datos de agentes disponibles</p>'}
+      </div>
+    `;
+
+    // Detailed Criteria Analysis (Expandable)
+    html += `
+      <div style="background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 0.75rem; padding: 1.25rem;">
+        <h4 style="font-size: 1rem; font-weight: 700; margin: 0 0 1rem 0; color: var(--text-primary);">
+          <i class="fas fa-clipboard-list" style="color: #6366f1;"></i> Análisis Detallado por Criterio
+        </h4>
+        
+        <!-- Empatía Criteria -->
+        <div style="margin-bottom: 1rem;">
+          <h5 style="font-size: 0.9rem; font-weight: 600; margin: 0 0 0.5rem 0; color: #38CEA6; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fas fa-heart"></i> Pilar Empatía (50%)
+          </h5>
+          <div style="display: grid; gap: 0.5rem;">
+            ${DataManager.AUDIT_CRITERIA.empatia.map(criterion => {
+              const deficiency = stats.criteriaDeficiencies[criterion.id] || { count: 0, percentage: 0 };
+              return `
+                <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid ${deficiency.percentage >= 30 ? '#ef4444' : deficiency.percentage >= 15 ? '#f59e0b' : '#38CEA6'};">
+                  <div>
+                    <strong style="font-size: 0.85rem;">${criterion.name}</strong>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">${criterion.description}</div>
+                  </div>
+                  <div style="text-align: right;">
+                    <div style="font-weight: 700; color: ${deficiency.percentage >= 30 ? '#dc2626' : deficiency.percentage >= 15 ? '#d97706' : '#16a34a'};">${deficiency.percentage}%</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">${deficiency.count} fallos</div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Gestión Criteria -->
+        <div>
+          <h5 style="font-size: 0.9rem; font-weight: 600; margin: 0 0 0.5rem 0; color: #f59e0b; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fas fa-cogs"></i> Pilar Gestión (50%)
+          </h5>
+          
+          <!-- Gestión de Ticket -->
+          <div style="margin-bottom: 0.75rem;">
+            <h6 style="font-size: 0.85rem; font-weight: 600; margin: 0 0 0.5rem 0; color: var(--text-primary);">Gestión de Ticket (33%)</h6>
+            <div style="display: grid; gap: 0.5rem;">
+              ${DataManager.AUDIT_CRITERIA.gestion.ticket.map(criterion => {
+                const deficiency = stats.criteriaDeficiencies[criterion.id] || { count: 0, percentage: 0 };
+                return `
+                  <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid ${deficiency.percentage >= 30 ? '#ef4444' : deficiency.percentage >= 15 ? '#f59e0b' : '#f59e0b33'};">
+                    <div>
+                      <strong style="font-size: 0.85rem;">${criterion.name}</strong>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${criterion.description}</div>
+                    </div>
+                    <div style="text-align: right;">
+                      <div style="font-weight: 700; color: ${deficiency.percentage >= 30 ? '#dc2626' : deficiency.percentage >= 15 ? '#d97706' : '#16a34a'};">${deficiency.percentage}%</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${deficiency.count} fallos</div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Conocimiento Integral -->
+          <div style="margin-bottom: 0.75rem;">
+            <h6 style="font-size: 0.85rem; font-weight: 600; margin: 0 0 0.5rem 0; color: var(--text-primary);">Conocimiento Integral (33%)</h6>
+            <div style="display: grid; gap: 0.5rem;">
+              ${DataManager.AUDIT_CRITERIA.gestion.conocimiento.map(criterion => {
+                const deficiency = stats.criteriaDeficiencies[criterion.id] || { count: 0, percentage: 0 };
+                return `
+                  <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid ${deficiency.percentage >= 30 ? '#ef4444' : deficiency.percentage >= 15 ? '#f59e0b' : '#f59e0b33'};">
+                    <div>
+                      <strong style="font-size: 0.85rem;">${criterion.name}</strong>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${criterion.description}</div>
+                    </div>
+                    <div style="text-align: right;">
+                      <div style="font-weight: 700; color: ${deficiency.percentage >= 30 ? '#dc2626' : deficiency.percentage >= 15 ? '#d97706' : '#16a34a'};">${deficiency.percentage}%</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${deficiency.count} fallos</div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Herramientas -->
+          <div>
+            <h6 style="font-size: 0.85rem; font-weight: 600; margin: 0 0 0.5rem 0; color: var(--text-primary);">Uso Estratégico de Herramientas (33%)</h6>
+            <div style="display: grid; gap: 0.5rem;">
+              ${DataManager.AUDIT_CRITERIA.gestion.herramientas.map(criterion => {
+                const deficiency = stats.criteriaDeficiencies[criterion.id] || { count: 0, percentage: 0 };
+                return `
+                  <div style="background: white; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid ${deficiency.percentage >= 30 ? '#ef4444' : deficiency.percentage >= 15 ? '#f59e0b' : '#f59e0b33'};">
+                    <div>
+                      <strong style="font-size: 0.85rem;">${criterion.name}</strong>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${criterion.description}</div>
+                    </div>
+                    <div style="text-align: right;">
+                      <div style="font-weight: 700; color: ${deficiency.percentage >= 30 ? '#dc2626' : deficiency.percentage >= 15 ? '#d97706' : '#16a34a'};">${deficiency.percentage}%</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">${deficiency.count} fallos</div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    container.innerHTML = html;
+  },
+
+  formatCategoryName(category) {
+    const names = {
+      'empatia': 'Empatía',
+      'gestion-ticket': 'Gestión Ticket',
+      'gestion-conocimiento': 'Conocimiento',
+      'gestion-herramientas': 'Herramientas'
+    };
+    return names[category] || category;
   }
 };
 
