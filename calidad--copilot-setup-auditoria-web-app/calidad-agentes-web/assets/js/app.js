@@ -53,7 +53,7 @@ const App = {
     return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   },
 
-  // Set a day status quickly (Libre / Guardia) from UI
+  // Set a day status quickly (Libre / Guardia / Clear) from UI
   setConnectionDayStatus(agentName, dateStr, status) {
     const yearFromDate = parseInt(dateStr.split('-')[0], 10);
     const monthIndex = parseInt(dateStr.split('-')[1], 10) - 1;
@@ -66,6 +66,17 @@ const App = {
     const targetWeekIndex = weeks.findIndex(w => w.startDate <= dateStr && dateStr <= w.endDate);
     if (targetWeekIndex === -1) {
       alert('La fecha seleccionada no pertenece a una semana configurada.');
+      return;
+    }
+
+    // Handle clear/delete status
+    if (status === 'clear') {
+      DataManager.clearAgentDailyHours(agentName, yearFromDate, monthIndex, targetWeekIndex, dateStr);
+      const d = this.parseLocalDate(dateStr);
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      alert(`Estado borrado para ${agentName} en ${dd}/${mm}.`);
+      this.loadConnectionHours();
       return;
     }
 
@@ -5873,6 +5884,7 @@ const App = {
             </select>
             <span title="Marcar Libre" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'libre')">😴</span>
             <span title="Marcar Guardia" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'guardia')">🛡️</span>
+            <span title="Borrar Estado" style="cursor: pointer;" onclick="App.setConnectionDayStatus('${agentName}', document.getElementById('daySel-${weekIndex}-${sanitizedAgent}').value, 'clear')">🗑️</span>
           </div>
         ` : '';
 

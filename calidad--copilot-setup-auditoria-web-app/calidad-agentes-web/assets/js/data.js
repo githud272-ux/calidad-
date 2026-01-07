@@ -1118,6 +1118,15 @@ const DataManager = {
     this.saveConnectionHoursData(year, month, allData);
   },
 
+  // Clear/delete agent daily hours for a specific date
+  clearAgentDailyHours(agentName, year, month, weekIndex, dateStr) {
+    const allData = this.getConnectionHoursData(year, month);
+    if (allData[agentName] && allData[agentName][weekIndex] && allData[agentName][weekIndex].days && allData[agentName][weekIndex].days[dateStr]) {
+      delete allData[agentName][weekIndex].days[dateStr];
+      this.saveConnectionHoursData(year, month, allData);
+    }
+  },
+
   // Get expected daily hours based on shift type
   // 8h para turnos normales (AM, PM, Fin de Semana)
   // 6h para turnos de madrugada
