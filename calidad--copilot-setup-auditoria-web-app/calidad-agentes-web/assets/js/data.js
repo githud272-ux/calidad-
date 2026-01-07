@@ -1570,7 +1570,11 @@ const DataManager = {
   },
 
   // Calculate satisfaction excluding incident days (Scenario B)
-  // Returns: { scenarioA: {...}, scenarioB: {...}, deviation: number }
+  // Returns object with:
+  // - scenarioA: { pct: number|null, totalTickets: number, totalGood: number } - All data
+  // - scenarioB: { pct: number|null, totalTickets: number, totalGood: number } - Excluding incident days
+  // - deviation: number - Percentage difference (scenarioB - scenarioA)
+  // - hasIncidents: boolean - Whether any incidents were found for this team
   calculateAgentSatisfactionWithIncidents(agentName, year, month, teamId) {
     const weeklyData = this.getWeeklyMetricsData(year, month);
     const weekConfig = this.getWeekConfig(year, month);
@@ -1618,12 +1622,14 @@ const DataManager = {
         
         // Check if any day in this week has an incident
         let weekHasIncident = false;
-        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-          const dateStr = d.toISOString().split('T')[0];
+        const currentDate = new Date(startDate);
+        while (currentDate <= endDate) {
+          const dateStr = currentDate.toISOString().split('T')[0];
           if (incidentDates.has(dateStr)) {
             weekHasIncident = true;
             break;
           }
+          currentDate.setDate(currentDate.getDate() + 1);
         }
         
         // If week has no incidents, include in scenario B
