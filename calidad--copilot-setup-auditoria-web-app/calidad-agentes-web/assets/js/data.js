@@ -223,10 +223,14 @@ const DataManager = {
   addTeamMember(teamId, memberData, addedBy = null, addedByRole = null) {
     const teams = this.getAllTeams();
     if (teams[teamId]) {
+      const sanitizedRotationDays = Array.isArray(memberData.rotationDays)
+        ? Array.from(new Set(memberData.rotationDays.map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n >= 0 && n <= 6)))
+        : [];
       teams[teamId].members.push({
         ...memberData,
         team: teamId,
         subTeam: memberData.subTeam || null,
+        rotationDays: sanitizedRotationDays,
         addedAt: new Date().toISOString(),
         addedBy: addedBy
       });
@@ -1059,6 +1063,10 @@ const DataManager = {
       ...memberData,
       team: teamId
     };
+
+    if (Array.isArray(memberData.rotationDays)) {
+      updatedMember.rotationDays = Array.from(new Set(memberData.rotationDays.map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n >= 0 && n <= 6)));
+    }
 
     teams[teamId].members[memberIndex] = updatedMember;
     SafeStorage.setItem(this.STORAGE_KEYS.TEAMS, JSON.stringify(teams));

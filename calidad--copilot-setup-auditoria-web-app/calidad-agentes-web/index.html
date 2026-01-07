@@ -1358,6 +1358,45 @@
           </div>
         </div>
 
+        <div id="rotationDaysSection" style="margin-bottom: 1.5rem;">
+          <label class="label-small">
+            <i class="fas fa-sync-alt"></i> Días de Rotación
+          </label>
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.5rem;">
+            <label style="display: flex; align-items: center; gap: 0.35rem;">
+              <input type="checkbox" name="memberRotationDays" value="1">
+              <span>Lun</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.35rem;">
+              <input type="checkbox" name="memberRotationDays" value="2">
+              <span>Mar</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.35rem;">
+              <input type="checkbox" name="memberRotationDays" value="3">
+              <span>Mié</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.35rem;">
+              <input type="checkbox" name="memberRotationDays" value="4">
+              <span>Jue</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.35rem;">
+              <input type="checkbox" name="memberRotationDays" value="5">
+              <span>Vie</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.35rem;">
+              <input type="checkbox" name="memberRotationDays" value="6">
+              <span>Sáb</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.35rem;">
+              <input type="checkbox" name="memberRotationDays" value="0">
+              <span>Dom</span>
+            </label>
+          </div>
+          <p style="margin: 0.5rem 0 0 0; font-size: 0.75rem; color: var(--text-muted);">
+            Selecciona solo los días con guardias previstas para el agente. No se contarán vacaciones ni días sin registro.
+          </p>
+        </div>
+
         <input type="hidden" id="memberModalMode" value="add">
         <input type="hidden" id="memberOriginalEmail" value="">
 

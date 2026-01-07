@@ -647,6 +647,60 @@ const App = {
     return [1, 2, 3, 4, 5];
   },
 
+  getDefaultRotationDaysForShift(shift) {
+    const normalized = (shift || '').toLowerCase();
+    if (!shift) return [];
+    if (normalized.includes('fin de semana') && !normalized.includes('semana completa')) {
+      return [0, 6];
+    }
+    return [1, 2, 3, 4, 5];
+  },
+
+  setRotationDayCheckboxes(days) {
+    const checkboxes = document.querySelectorAll('input[name="memberRotationDays"]');
+    if (!checkboxes || checkboxes.length === 0) return;
+    const normalized = Array.isArray(days)
+      ? Array.from(new Set(days.map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n >= 0 && n <= 6)))
+      : [];
+    checkboxes.forEach(cb => {
+      const value = parseInt(cb.value, 10);
+      cb.checked = normalized.includes(value);
+    });
+  },
+
+  collectRotationDayCheckboxes() {
+    const checkboxes = document.querySelectorAll('input[name="memberRotationDays"]:checked');
+    if (!checkboxes || checkboxes.length === 0) return [];
+    return Array.from(checkboxes).map(cb => parseInt(cb.value, 10)).filter(n => !isNaN(n) && n >= 0 && n <= 6);
+  },
+
+  resetRotationDayCheckboxes() {
+    this.setRotationDayCheckboxes([]);
+  },
+
+  toggleRotationDaysSection(show) {
+    const section = document.getElementById('rotationDaysSection');
+    if (!section) return;
+    section.style.display = show ? 'block' : 'none';
+  },
+
+  applyRotationDefaultsForShift(shift) {
+    if (!shift) {
+      this.resetRotationDayCheckboxes();
+      return;
+    }
+    const defaults = this.getDefaultRotationDaysForShift(shift);
+    if (defaults.length > 0) {
+      this.setRotationDayCheckboxes(defaults);
+    } else {
+      this.resetRotationDayCheckboxes();
+    }
+  },
+
+  onMemberShiftChange(shift) {
+    this.applyRotationDefaultsForShift(shift);
+  },
+
   // Format seconds to H:MM:SS (allows negative)
   formatSignedHMS(seconds) {
     const s = parseInt(seconds, 10) || 0;
@@ -679,6 +733,7 @@ const App = {
     const currentMonth = new Date().getMonth();
     const configuredMonths = DataManager.getConfiguredMonths(currentYear);
     const isEditor = DataManager.isEditor();
+    const canSeeMissing = DataManager.isAdmin();
     
     // For editors: show all 12 months
     // For users: show only current month + 2 months ahead (max 2 months advance)
@@ -959,6 +1014,10 @@ const App = {
         }
       });
     }
+
+    document.querySelectorAll('input[name="memberShift"]').forEach(radio => {
+      radio.addEventListener('change', (e) => this.onMemberShiftChange(e.target.value));
+    });
     
     // Keyboard navigation for table scrolling
     this.setupTableKeyboardNavigation();
@@ -1068,6 +1127,45 @@ const App = {
     // Use MutationObserver to detect when tables are added to DOM
     const observer = new MutationObserver(makeTablesFocusable);
     observer.observe(document.body, { childList: true, subtree: true });
+  },
+
+  // Setup sticky agent names that follow horizontal scroll
+  setupStickyAgentNames() {
+    // Find all table-scroll containers in weekly metrics view
+    const weeklyView = document.getElementById('metricsWeeklyView');
+    if (!weeklyView) return;
+
+    const tableScrolls = weeklyView.querySelectorAll('.table-scroll');
+    
+    tableScrolls.forEach(scrollContainer => {
+      // Remove any existing scroll listener to avoid duplicates
+      if (scrollContainer._stickyScrollHandler) {
+        scrollContainer.removeEventListener('scroll', scrollContainer._stickyScrollHandler);
+      }
+
+      // Create scroll handler
+      const scrollHandler = () => {
+        const scrollLeft = scrollContainer.scrollLeft;
+        const table = scrollContainer.querySelector('.data-table');
+        
+        if (!table) return;
+
+        // Get all first column cells (agent names)
+        const firstColCells = table.querySelectorAll('th:first-child, td:first-child');
+        
+        // Update the left position of sticky columns based on scroll
+        // The names will move with the scroll to stay visible
+        firstColCells.forEach(cell => {
+          cell.style.left = `${scrollLeft}px`;
+        });
+      };
+
+      // Attach the handler
+      scrollContainer.addEventListener('scroll', scrollHandler, { passive: true });
+      
+      // Store reference to remove it later if needed
+      scrollContainer._stickyScrollHandler = scrollHandler;
+    });
   },
 
   // Authentication handlers
@@ -2781,6 +2879,9 @@ const App = {
       shiftSection.style.display = 'none';
     }
     
+    this.toggleRotationDaysSection(false);
+    this.resetRotationDayCheckboxes();
+
     // Remove required attribute from shift radios
     document.querySelectorAll('input[name="memberShift"]').forEach(radio => {
       radio.required = false;
@@ -2835,6 +2936,9 @@ const App = {
       shiftSection.style.display = 'none';
     }
     
+    this.toggleRotationDaysSection(false);
+    this.resetRotationDayCheckboxes();
+
     // Remove required attribute from shift radios
     document.querySelectorAll('input[name="memberShift"]').forEach(radio => {
       radio.required = false;
@@ -2891,6 +2995,9 @@ const App = {
       shiftSection.style.display = 'none';
     }
     
+    this.toggleRotationDaysSection(false);
+    this.resetRotationDayCheckboxes();
+
     // Remove required attribute from shift radios
     document.querySelectorAll('input[name="memberShift"]').forEach(radio => {
       radio.required = false;
@@ -2951,6 +3058,9 @@ const App = {
       shiftSection.style.display = 'block';
     }
     
+    this.toggleRotationDaysSection(true);
+    this.resetRotationDayCheckboxes();
+
     // Restore required attribute for shift radios
     document.querySelectorAll('input[name="memberShift"]').forEach(radio => {
       radio.required = true;
@@ -2997,9 +3107,30 @@ const App = {
       subTeamInput.value = member.subTeam || '';
     }
 
+    const isSupervisorType = member.role === 'supervisor';
+    const isAnalistaType = member.role === 'analista';
+    const isCalidadType = member.role === 'calidad';
+    const isSpecialRole = isSupervisorType || isAnalistaType || isCalidadType;
+
+    const shiftSection = document.getElementById('shiftSection');
+    if (shiftSection) {
+      shiftSection.style.display = isSpecialRole ? 'none' : 'block';
+    }
+
     document.querySelectorAll('input[name="memberShift"]').forEach(radio => {
+      radio.required = !isSpecialRole;
       radio.checked = radio.value === member.shift;
     });
+
+    this.toggleRotationDaysSection(!isSpecialRole);
+    if (!isSpecialRole) {
+      const rotationPreset = Array.isArray(member.rotationDays) && member.rotationDays.length > 0
+        ? member.rotationDays
+        : this.getDefaultRotationDaysForShift(member.shift);
+      this.setRotationDayCheckboxes(rotationPreset);
+    } else {
+      this.resetRotationDayCheckboxes();
+    }
 
     const submitBtn = document.querySelector('#addMemberForm button[type="submit"]');
     if (submitBtn) {
@@ -3074,6 +3205,13 @@ const App = {
     if (!isSpecialRole) {
       memberData.shift = shift;
       memberData.subTeam = subTeam;
+      let rotationDays = this.collectRotationDayCheckboxes();
+      if ((!rotationDays || rotationDays.length === 0) && shift) {
+        rotationDays = this.getDefaultRotationDaysForShift(shift);
+      }
+      memberData.rotationDays = rotationDays;
+    } else {
+      memberData.rotationDays = [];
     }
     
     let success = false;
@@ -3873,6 +4011,8 @@ const App = {
       container.innerHTML = fullHTML;
       // Re-apply custom scrollbars for dynamically added tables
       this.initializeOverlayScrollbars();
+      // Setup sticky agent names that follow horizontal scroll
+      this.setupStickyAgentNames();
       return;
     }
     
@@ -4259,6 +4399,8 @@ const App = {
     container.innerHTML = tableHTML;
     // Re-apply custom scrollbars for dynamically added tables
     this.initializeOverlayScrollbars();
+    // Setup sticky agent names that follow horizontal scroll
+    this.setupStickyAgentNames();
   },
 
   // Helper function to render weekly metrics table for a single team
@@ -6473,7 +6615,7 @@ const App = {
               if (!isInRotation) {
                 cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
               } else {
-                const vis = isEditor ? 'visible' : 'hidden';
+                const vis = canSeeMissing ? 'visible' : 'hidden';
                 cellContent = `<span style="color: #ef4444; font-weight: 700; visibility: ${vis};">-${this.formatSignedHMS(expectedDailySeconds)}</span>`;
                 cellStyle += ' background: rgba(239, 68, 68, 0.08);';
               }
@@ -6484,17 +6626,20 @@ const App = {
               cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
             } else {
               // FALTA: día obligatorio sin conexión
-              const vis = isEditor ? 'visible' : 'hidden';
+              const vis = canSeeMissing ? 'visible' : 'hidden';
               cellContent = `<span style="color: #ef4444; font-weight: 700; visibility: ${vis};">-${this.formatSignedHMS(expectedDailySeconds)}</span>`;
               cellStyle += ' background: rgba(239, 68, 68, 0.08);';
             }
           }
 
           // Conteo de días obligatorios (rotación) considerando justificaciones
-          if (isInRotation) {
-            const status = dayData?.status;
-            // Descanso/Vacaciones/Vacante/Cambio justifican y sacan el día del esperado
-            if (status !== 'libre' && status !== 'vacaciones' && status !== 'vacante' && status !== 'guardia') {
+          if (isInRotation && dayData) {
+            const status = String(dayData.status || '').toLowerCase();
+            const secondsWorked = dayData.hours ? DataManager.parseTimeToSeconds(dayData.hours) : 0;
+            const hasHours = secondsWorked > 0;
+            const isCambio = status === 'cambio' || status === 'cambio_recibido';
+            const isVacante = status === 'guardia' || status === 'vacante';
+            if (hasHours || isCambio || isVacante) {
               requiredDays += 1;
             }
           }
@@ -6558,6 +6703,7 @@ const App = {
     if (agentsList.length === 0) return '';
     
     const shortDayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    const canSeeMissing = DataManager.isAdmin();
     
     // Helper to format seconds to H:MM:SS
     const formatTimeHMS = (seconds) => {
@@ -6729,7 +6875,7 @@ const App = {
               if (!isInRotation) {
                 cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
               } else {
-                const vis = isEditor ? 'visible' : 'hidden';
+                const vis = canSeeMissing ? 'visible' : 'hidden';
                 cellContent = `<span style="color: #ef4444; font-weight: 700; visibility: ${vis};">-${this.formatSignedHMS(expectedDailySeconds)}</span>`;
                 cellStyle += ' background: rgba(239, 68, 68, 0.08);';
               }
@@ -6738,16 +6884,20 @@ const App = {
             if (!isInRotation) {
               cellContent = '<span style="color: #9ca3af; font-style: italic;">Libre</span>';
             } else {
-              const vis = isEditor ? 'visible' : 'hidden';
+              const vis = canSeeMissing ? 'visible' : 'hidden';
               cellContent = `<span style="color: #ef4444; font-weight: 700; visibility: ${vis};">-${this.formatSignedHMS(expectedDailySeconds)}</span>`;
               cellStyle += ' background: rgba(239, 68, 68, 0.08);';
             }
           }
 
           // Conteo de días obligatorios según rotación
-          if (isInRotation) {
-            const status = dayData?.status;
-            if (status !== 'libre' && status !== 'vacaciones' && status !== 'vacante' && status !== 'guardia') {
+          if (isInRotation && dayData) {
+            const status = String(dayData.status || '').toLowerCase();
+            const secondsWorked = dayData.hours ? DataManager.parseTimeToSeconds(dayData.hours) : 0;
+            const hasHours = secondsWorked > 0;
+            const isCambio = status === 'cambio' || status === 'cambio_recibido';
+            const isVacante = status === 'guardia' || status === 'vacante';
+            if (hasHours || isCambio || isVacante) {
               requiredDays += 1;
             }
           }
