@@ -1019,9 +1019,10 @@ const DataManager = {
   },
 
   // Calculate satisfaction percentage for an agent based on weekly metrics
+  // Solo cuenta si tiene al menos 1 ticket; de lo contrario devuelve null para no penalizar
   calculateAgentSatisfaction(agentName, year, month) {
     const weeklyData = this.getWeeklyMetricsData(year, month);
-    if (!weeklyData[agentName]) return 0;
+    if (!weeklyData[agentName]) return { pct: null, totalTickets: 0 };
     
     let totalTickets = 0;
     let totalGood = 0;
@@ -1033,8 +1034,8 @@ const DataManager = {
       }
     });
     
-    if (totalTickets === 0) return 0;
-    return Math.round((totalGood / totalTickets) * 100);
+    if (totalTickets === 0) return { pct: null, totalTickets: 0 };
+    return { pct: Math.round((totalGood / totalTickets) * 100), totalTickets };
   },
 
   // Get agent email by name (from teams)

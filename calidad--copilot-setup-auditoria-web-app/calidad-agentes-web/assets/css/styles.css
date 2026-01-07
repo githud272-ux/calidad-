@@ -548,3 +548,15 @@ body {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(56, 206, 166, 0.2);
 }
+
+/* Compactar la sección de Horas de Conexión para que no ocupe toda la pantalla */
+#connectionHoursContainer {
+  max-height: 70vh;
+  overflow: auto;
+}
+
+@media (max-width: 768px) {
+  #connectionHoursContainer {
+    max-height: 60vh;
+  }
+}
