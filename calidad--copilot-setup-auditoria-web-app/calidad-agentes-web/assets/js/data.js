@@ -1622,14 +1622,16 @@ const DataManager = {
         
         // Check if any day in this week has an incident
         let weekHasIncident = false;
-        const currentDate = new Date(startDate);
-        while (currentDate <= endDate) {
-          const dateStr = currentDate.toISOString().split('T')[0];
-          if (incidentDates.has(dateStr)) {
-            weekHasIncident = true;
-            break;
+        if (startDate <= endDate) {
+          const currentDate = new Date(startDate);
+          while (currentDate <= endDate) {
+            const dateStr = currentDate.toISOString().split('T')[0];
+            if (incidentDates.has(dateStr)) {
+              weekHasIncident = true;
+              break;
+            }
+            currentDate.setDate(currentDate.getDate() + 1);
           }
-          currentDate.setDate(currentDate.getDate() + 1);
         }
         
         // If week has no incidents, include in scenario B
