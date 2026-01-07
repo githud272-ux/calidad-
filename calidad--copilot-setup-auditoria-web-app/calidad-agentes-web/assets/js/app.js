@@ -1070,6 +1070,45 @@ const App = {
     observer.observe(document.body, { childList: true, subtree: true });
   },
 
+  // Setup sticky agent names that follow horizontal scroll
+  setupStickyAgentNames() {
+    // Find all table-scroll containers in weekly metrics view
+    const weeklyView = document.getElementById('metricsWeeklyView');
+    if (!weeklyView) return;
+
+    const tableScrolls = weeklyView.querySelectorAll('.table-scroll');
+    
+    tableScrolls.forEach(scrollContainer => {
+      // Remove any existing scroll listener to avoid duplicates
+      if (scrollContainer._stickyScrollHandler) {
+        scrollContainer.removeEventListener('scroll', scrollContainer._stickyScrollHandler);
+      }
+
+      // Create scroll handler
+      const scrollHandler = () => {
+        const scrollLeft = scrollContainer.scrollLeft;
+        const table = scrollContainer.querySelector('.data-table');
+        
+        if (!table) return;
+
+        // Get all first column cells (agent names)
+        const firstColCells = table.querySelectorAll('th:first-child, td:first-child');
+        
+        // Update the left position of sticky columns based on scroll
+        // The names will move with the scroll to stay visible
+        firstColCells.forEach(cell => {
+          cell.style.left = `${scrollLeft}px`;
+        });
+      };
+
+      // Attach the handler
+      scrollContainer.addEventListener('scroll', scrollHandler, { passive: true });
+      
+      // Store reference to remove it later if needed
+      scrollContainer._stickyScrollHandler = scrollHandler;
+    });
+  },
+
   // Authentication handlers
   handleLogin(e) {
     e.preventDefault();
@@ -3873,6 +3912,8 @@ const App = {
       container.innerHTML = fullHTML;
       // Re-apply custom scrollbars for dynamically added tables
       this.initializeOverlayScrollbars();
+      // Setup sticky agent names that follow horizontal scroll
+      this.setupStickyAgentNames();
       return;
     }
     
@@ -4259,6 +4300,8 @@ const App = {
     container.innerHTML = tableHTML;
     // Re-apply custom scrollbars for dynamically added tables
     this.initializeOverlayScrollbars();
+    // Setup sticky agent names that follow horizontal scroll
+    this.setupStickyAgentNames();
   },
 
   // Helper function to render weekly metrics table for a single team

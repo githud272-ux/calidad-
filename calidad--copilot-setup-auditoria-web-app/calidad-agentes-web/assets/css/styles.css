@@ -418,37 +418,23 @@ body {
 }
 
 /* Métricas Semanales: mantiene visible la columna de nombres (tipo "congelar paneles") */
-/* Sticky columns for names (first column) and shift (second column) */
-#metricsWeeklyView .data-table th:first-child,
-#metricsWeeklyView .data-table th:nth-child(2) {
+/* Sticky columns for names (first column) that moves with horizontal scroll */
+#metricsWeeklyView .data-table th:first-child {
   position: sticky;
+  left: 0;
   z-index: 6;
   background: linear-gradient(135deg, #e8fdf7, #d4f5ea);
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
-}
-
-#metricsWeeklyView .data-table th:first-child {
-  left: 0;
-}
-
-#metricsWeeklyView .data-table th:nth-child(2) {
-  left: 150px; /* Width of first column */
-}
-
-#metricsWeeklyView .data-table td:first-child,
-#metricsWeeklyView .data-table td:nth-child(2) {
-  position: sticky;
-  z-index: 5;
-  background: white;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
+  transition: left 0.1s ease-out;
 }
 
 #metricsWeeklyView .data-table td:first-child {
+  position: sticky;
   left: 0;
-}
-
-#metricsWeeklyView .data-table td:nth-child(2) {
-  left: 150px; /* Width of first column */
+  z-index: 5;
+  background: white;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
+  transition: left 0.1s ease-out;
 }
 
 /* Evita que el hover cree stacking contexts que tapen la columna sticky */
@@ -456,8 +442,7 @@ body {
   transform: none;
 }
 
-#metricsWeeklyView .data-table tbody tr:hover td:first-child,
-#metricsWeeklyView .data-table tbody tr:hover td:nth-child(2) {
+#metricsWeeklyView .data-table tbody tr:hover td:first-child {
   background: linear-gradient(135deg, #f8fcff, #eefbf7);
 }
 .empty { text-align: center; color: var(--text-muted); padding: 1rem 0; }
