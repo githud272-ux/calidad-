@@ -40,7 +40,9 @@ const DataManager = {
     AUDIT_VIEWS: 'calidad_audit_views',
     AUDIT_COMMENTS: 'calidad_audit_comments',
     ACTIVITY_LOG: 'calidad_activity_log',
-    CONNECTION_HOURS: 'calidad_connection_hours'
+    CONNECTION_HOURS: 'calidad_connection_hours',
+    INCIDENTS: 'calidad_incidents',
+    INCIDENT_TYPES: 'calidad_incident_types'
   },
 
   // Remove all persisted app data so every load starts clean
@@ -891,7 +893,20 @@ const DataManager = {
   getWeeklyMetricsData(year, month) {
     const key = `${year}-${month}`;
     const allData = JSON.parse(SafeStorage.getItem(this.STORAGE_KEYS.WEEKLY_METRICS) || '{}');
-    return allData[key] || {};
+    if (allData[key]) return allData[key] || {};
+
+    // Back-compat/migration for cross-year selection bug (e.g., Jan/Feb next-year saved under previous year)
+    const y = parseInt(year, 10);
+    const m = parseInt(month, 10);
+    const prevKey = `${y - 1}-${m}`;
+    if ((m === 0 || m === 1) && allData[prevKey] && Object.keys(allData[prevKey] || {}).length > 0) {
+      // Migrate forward to requested key to make future reads consistent
+      allData[key] = allData[prevKey];
+      SafeStorage.setItem(this.STORAGE_KEYS.WEEKLY_METRICS, JSON.stringify(allData));
+      return allData[key] || {};
+    }
+
+    return {};
   },
 
   saveWeeklyMetricsData(year, month, data) {
@@ -904,7 +919,19 @@ const DataManager = {
   getWeekConfig(year, month) {
     const key = `${year}-${month}`;
     const allConfigs = JSON.parse(SafeStorage.getItem(this.STORAGE_KEYS.WEEK_CONFIG) || '{}');
-    return allConfigs[key] || [];
+    if (allConfigs[key]) return allConfigs[key] || [];
+
+    // Back-compat/migration for cross-year selection bug
+    const y = parseInt(year, 10);
+    const m = parseInt(month, 10);
+    const prevKey = `${y - 1}-${m}`;
+    if ((m === 0 || m === 1) && Array.isArray(allConfigs[prevKey]) && allConfigs[prevKey].length > 0) {
+      allConfigs[key] = allConfigs[prevKey];
+      SafeStorage.setItem(this.STORAGE_KEYS.WEEK_CONFIG, JSON.stringify(allConfigs));
+      return allConfigs[key] || [];
+    }
+
+    return [];
   },
 
   ensureWeekConfig(year, month) {
@@ -912,12 +939,22 @@ const DataManager = {
     const allConfigs = JSON.parse(SafeStorage.getItem(this.STORAGE_KEYS.WEEK_CONFIG) || '{}');
     // Solo generar si no existe configuración previa para este mes/año
     const existing = allConfigs[key];
-    if (!existing || !Array.isArray(existing) || existing.length === 0) {
-      allConfigs[key] = this.getWeeksOfMonth(year, month);
+    if (existing && Array.isArray(existing) && existing.length > 0) return existing;
+
+    // Try migration from previous year if it exists (cross-year selection bug)
+    const y = parseInt(year, 10);
+    const m = parseInt(month, 10);
+    const prevKey = `${y - 1}-${m}`;
+    const prevExisting = allConfigs[prevKey];
+    if ((m === 0 || m === 1) && Array.isArray(prevExisting) && prevExisting.length > 0) {
+      allConfigs[key] = prevExisting;
       SafeStorage.setItem(this.STORAGE_KEYS.WEEK_CONFIG, JSON.stringify(allConfigs));
       return allConfigs[key];
     }
-    return existing;
+
+    allConfigs[key] = this.getWeeksOfMonth(year, month);
+    SafeStorage.setItem(this.STORAGE_KEYS.WEEK_CONFIG, JSON.stringify(allConfigs));
+    return allConfigs[key];
   },
 
   getConfiguredMonths(year) {
@@ -1520,6 +1557,650 @@ const DataManager = {
   getGlobalStatistics(year, month) {
     const audits = this.getAuditsForStatistics(year, month);
     return this.calculateAuditStatistics(audits);
+  },
+
+  // ===== INCIDENT MANAGEMENT =====
+  
+  // Get default incident types
+  getDefaultIncidentTypes() {
+    return [
+      'Caída Bancaria',
+      'Falla de App',
+      'Intermitencia Bancaria',
+      'Caída de Plataforma',
+      'Falla de Equipos'
+    ];
+  },
+
+  // Get all incident types (default + custom)
+  getAllIncidentTypes() {
+    const customTypes = JSON.parse(SafeStorage.getItem(this.STORAGE_KEYS.INCIDENT_TYPES) || '[]');
+    const defaultTypes = this.getDefaultIncidentTypes();
+    return [...new Set([...defaultTypes, ...customTypes])].sort();
+  },
+
+  // Add a new custom incident type
+  addIncidentType(type) {
+    if (!type || typeof type !== 'string') return false;
+    const trimmedType = type.trim();
+    if (!trimmedType) return false;
+    
+    const allTypes = this.getAllIncidentTypes();
+    if (allTypes.includes(trimmedType)) return false;
+    
+    const customTypes = JSON.parse(SafeStorage.getItem(this.STORAGE_KEYS.INCIDENT_TYPES) || '[]');
+    customTypes.push(trimmedType);
+    SafeStorage.setItem(this.STORAGE_KEYS.INCIDENT_TYPES, JSON.stringify(customTypes));
+    return true;
+  },
+
+  // Get all incidents
+  getAllIncidents() {
+    return JSON.parse(SafeStorage.getItem(this.STORAGE_KEYS.INCIDENTS) || '[]');
+  },
+
+  // Save a new incident
+  saveIncident(incidentData) {
+    const incidents = this.getAllIncidents();
+    const newIncident = {
+      id: this.generateId(),
+      date: incidentData.date,
+      type: incidentData.type,
+      affectedTeams: incidentData.affectedTeams || [], // Array of team IDs
+      description: incidentData.description || '',
+      // Optional day metrics (same structure as weekly metric rows) keyed by agent name
+      dayMetricsByAgent: incidentData.dayMetricsByAgent || null,
+      // Whether this incident should be omitted in the adjusted scenario (Scenario B)
+      omitFromScenario: (incidentData.omitFromScenario === undefined) ? true : !!incidentData.omitFromScenario,
+      createdAt: new Date().toISOString(),
+      createdBy: incidentData.createdBy || null
+    };
+    incidents.push(newIncident);
+    SafeStorage.setItem(this.STORAGE_KEYS.INCIDENTS, JSON.stringify(incidents));
+    return newIncident;
+  },
+
+  // Update an incident
+  updateIncident(id, incidentData) {
+    const incidents = this.getAllIncidents();
+    const index = incidents.findIndex(inc => inc.id === id);
+    if (index !== -1) {
+      incidents[index] = {
+        ...incidents[index],
+        ...incidentData,
+        // normalize legacy
+        omitFromScenario: (incidentData?.omitFromScenario === undefined)
+          ? (incidents[index].omitFromScenario === undefined ? true : !!incidents[index].omitFromScenario)
+          : !!incidentData.omitFromScenario,
+        updatedAt: new Date().toISOString()
+      };
+      SafeStorage.setItem(this.STORAGE_KEYS.INCIDENTS, JSON.stringify(incidents));
+      return incidents[index];
+    }
+    return null;
+  },
+
+  // Get incidents in a given month/year and optional team filter
+  getIncidentsForMonth(year, month, teamId = null) {
+    const incidents = this.getAllIncidents();
+    const y = parseInt(year, 10);
+    const m = parseInt(month, 10);
+    return incidents.filter(inc => {
+      const d = new Date(inc.date);
+      if (isNaN(d.getTime())) return false;
+      const matchesMonth = d.getFullYear() === y && d.getMonth() === m;
+      const matchesTeam = !teamId || (Array.isArray(inc.affectedTeams) && inc.affectedTeams.includes(teamId));
+      return matchesMonth && matchesTeam;
+    });
+  },
+
+  // Delete an incident
+  deleteIncident(id) {
+    const incidents = this.getAllIncidents();
+    const filtered = incidents.filter(inc => inc.id !== id);
+    SafeStorage.setItem(this.STORAGE_KEYS.INCIDENTS, JSON.stringify(filtered));
+    return true;
+  },
+
+  // Get incidents for a specific team and date
+  getIncidentsForTeamAndDate(teamId, date) {
+    const incidents = this.getAllIncidents();
+    return incidents.filter(inc => 
+      inc.date === date && inc.affectedTeams.includes(teamId)
+    );
+  },
+
+  // Check if a date has incidents for a team
+  hasIncidentOnDate(teamId, date) {
+    return this.getIncidentsForTeamAndDate(teamId, date).length > 0;
+  },
+
+  // Calculate Impact Scenarios for incidents:
+  // A (Real): weekly totals as loaded
+  // B (Adjusted): subtract incident day metrics (when provided) for incidents marked omitFromScenario
+  calculateIncidentImpactScenarios(year, month, teamId = null) {
+    const weeklyData = this.getWeeklyMetricsData(year, month);
+    const incidentsInScope = this.getIncidentsForMonth(year, month, teamId);
+
+    // Normalize legacy fields
+    const normalizedIncidents = incidentsInScope.map(inc => ({
+      ...inc,
+      omitFromScenario: (inc.omitFromScenario === undefined) ? true : !!inc.omitFromScenario,
+      dayMetricsByAgent: inc.dayMetricsByAgent || null
+    }));
+
+    const teams = this.getAllTeams();
+    let agentsToProcess = [];
+    if (teamId) {
+      const team = teams[teamId];
+      if (team && team.members) agentsToProcess = team.members.map(m => ({ ...m, teamId }));
+    } else {
+      Object.keys(teams).forEach(tid => {
+        if (teams[tid].members) {
+          teams[tid].members.forEach(m => agentsToProcess.push({ ...m, teamId: tid }));
+        }
+      });
+    }
+
+    const scenarioA = {};
+    const scenarioB = {};
+
+    let incidentsWithDayMetrics = 0;
+    normalizedIncidents.forEach(inc => {
+      if (inc.dayMetricsByAgent && Object.keys(inc.dayMetricsByAgent).length > 0) incidentsWithDayMetrics++;
+    });
+
+    // Precompute omit totals per agent based on incident day metrics
+    // Only for incidents affecting the agent team and marked omitFromScenario
+    const omitTotalsByAgent = {};
+    const addOmit = (agentName, metric) => {
+      if (!omitTotalsByAgent[agentName]) {
+        omitTotalsByAgent[agentName] = {
+          tickets: 0,
+          good: 0,
+          bad: 0,
+          firstResponseWeighted: 0
+        };
+      }
+      const t = omitTotalsByAgent[agentName];
+      const tickets = metric?.tickets || 0;
+      const good = metric?.ticketsGood || 0;
+      const bad = metric?.ticketsBad || 0;
+      const fr = metric?.firstResponse || 0;
+      t.tickets += tickets;
+      t.good += good;
+      t.bad += bad;
+      t.firstResponseWeighted += (tickets > 0 ? (fr * tickets) : 0);
+    };
+
+    normalizedIncidents.forEach(inc => {
+      if (!inc.omitFromScenario) return;
+      if (!inc.dayMetricsByAgent) return;
+      // If team filter is not set, this incident could include multiple teams.
+      // We will subtract per-agent metrics; team membership will be handled by agentsToProcess.
+      Object.entries(inc.dayMetricsByAgent).forEach(([agentName, metric]) => {
+        addOmit(agentName, metric);
+      });
+    });
+
+    agentsToProcess.forEach(agent => {
+      const agentName = agent.name;
+      const agentTeam = agent.teamId;
+      const agentData = weeklyData[agentName];
+      if (!agentData) return;
+
+      let totalTickets = 0;
+      let totalGood = 0;
+      let totalBad = 0;
+      let firstResponseWeighted = 0; // seconds * tickets
+
+      Object.values(agentData).forEach(weekData => {
+        const tickets = weekData?.tickets || 0;
+        const good = weekData?.ticketsGood || 0;
+        const bad = weekData?.ticketsBad || 0;
+        const fr = weekData?.firstResponse || 0;
+        totalTickets += tickets;
+        totalGood += good;
+        totalBad += bad;
+        firstResponseWeighted += (tickets > 0 ? (fr * tickets) : 0);
+      });
+
+      const satA = totalTickets > 0 ? Math.round((totalGood / totalTickets) * 100) : null;
+      scenarioA[agentName] = {
+        totalTickets,
+        totalGood,
+        totalBad,
+        firstResponseWeighted,
+        satisfactionPct: satA,
+        teamId: agentTeam
+      };
+
+      const omit = omitTotalsByAgent[agentName] || { tickets: 0, good: 0, bad: 0, firstResponseWeighted: 0 };
+
+      // Important: only subtract omit totals when the incident actually affects this team.
+      // Since dayMetrics paste can include multiple teams, verify using the incident scope.
+      // If teamId is provided, incidents are already filtered by team.
+      // If teamId is not provided, we only subtract for incidents that include agentTeam.
+      let effectiveOmit = omit;
+      if (!teamId) {
+        // recompute omit per agent for this team only
+        effectiveOmit = { tickets: 0, good: 0, bad: 0, firstResponseWeighted: 0 };
+        normalizedIncidents.forEach(inc => {
+          if (!inc.omitFromScenario) return;
+          if (!Array.isArray(inc.affectedTeams) || !inc.affectedTeams.includes(agentTeam)) return;
+          const metric = inc.dayMetricsByAgent?.[agentName];
+          if (!metric) return;
+          const tickets = metric?.tickets || 0;
+          const good = metric?.ticketsGood || 0;
+          const bad = metric?.ticketsBad || 0;
+          const fr = metric?.firstResponse || 0;
+          effectiveOmit.tickets += tickets;
+          effectiveOmit.good += good;
+          effectiveOmit.bad += bad;
+          effectiveOmit.firstResponseWeighted += (tickets > 0 ? (fr * tickets) : 0);
+        });
+      }
+
+      const bTickets = Math.max(0, totalTickets - (effectiveOmit.tickets || 0));
+      const bGood = Math.max(0, totalGood - (effectiveOmit.good || 0));
+      const bBad = Math.max(0, totalBad - (effectiveOmit.bad || 0));
+      const bFrWeighted = Math.max(0, firstResponseWeighted - (effectiveOmit.firstResponseWeighted || 0));
+
+      const satB = bTickets > 0 ? Math.round((bGood / bTickets) * 100) : null;
+      scenarioB[agentName] = {
+        totalTickets: bTickets,
+        totalGood: bGood,
+        totalBad: bBad,
+        firstResponseWeighted: bFrWeighted,
+        satisfactionPct: satB,
+        teamId: agentTeam
+      };
+    });
+
+    const meta = {
+      incidentsInScope: normalizedIncidents.length,
+      incidentsWithDayMetrics,
+      incidentsList: normalizedIncidents.map(inc => ({
+        id: inc.id,
+        date: inc.date,
+        type: inc.type,
+        omitFromScenario: (inc.omitFromScenario === undefined) ? true : !!inc.omitFromScenario,
+        hasDayMetrics: !!(inc.dayMetricsByAgent && Object.keys(inc.dayMetricsByAgent).length > 0)
+      }))
+    };
+
+    return { scenarioA, scenarioB, meta };
+  },
+
+  // === Flexible impact calculator (weeks + omissions) ===
+  // Metrics tracked:
+  // - tickets, good, bad
+  // - firstResponseWeightedSec (seconds * tickets)
+  // - resolutionWeightedMin (minutes * tickets)
+  // - ticketsPerHourWeighted (ticketsPerHour * tickets)
+  _getAgentTeamMap() {
+    const teams = this.getAllTeams();
+    const map = {};
+    Object.keys(teams).forEach(teamId => {
+      const team = teams[teamId];
+      if (!team || !Array.isArray(team.members)) return;
+      team.members.forEach(m => {
+        if (m && m.name) map[m.name] = teamId;
+      });
+    });
+    return map;
+  },
+
+  _normalizeWeekIndices(weeklyDataByAgent, weekIndices) {
+    if (Array.isArray(weekIndices) && weekIndices.length > 0) {
+      return weekIndices
+        .map(w => parseInt(w, 10))
+        .filter(w => Number.isInteger(w) && w >= 0)
+        .sort((a, b) => a - b);
+    }
+
+    // Default: infer from data
+    const indices = new Set();
+    Object.values(weeklyDataByAgent || {}).forEach(byWeek => {
+      Object.keys(byWeek || {}).forEach(k => {
+        const w = parseInt(k, 10);
+        if (Number.isInteger(w) && w >= 0) indices.add(w);
+      });
+    });
+    return Array.from(indices).sort((a, b) => a - b);
+  },
+
+  _newAgentTotals(teamId) {
+    return {
+      teamId,
+      tickets: 0,
+      good: 0,
+      bad: 0,
+      firstResponseWeightedSec: 0,
+      resolutionWeightedMin: 0,
+      ticketsPerHourWeighted: 0
+    };
+  },
+
+  _addMetricTotals(target, metric) {
+    if (!target || !metric) return;
+    const tickets = metric.tickets || 0;
+    const good = metric.ticketsGood || metric.good || 0;
+    const bad = metric.ticketsBad || metric.bad || 0;
+    const frSec = metric.firstResponse || metric.firstResponseSec || 0;
+    const resolMin = metric.resolutionTime || metric.resolutionMin || 0;
+    const tph = metric.ticketsPerHour || 0;
+
+    target.tickets += tickets;
+    target.good += good;
+    target.bad += bad;
+    target.firstResponseWeightedSec += (tickets > 0 ? frSec * tickets : 0);
+    target.resolutionWeightedMin += (tickets > 0 ? resolMin * tickets : 0);
+    target.ticketsPerHourWeighted += (tickets > 0 ? tph * tickets : 0);
+  },
+
+  _subtractMetricTotals(target, metric) {
+    if (!target || !metric) return;
+    const tickets = metric.tickets || 0;
+    const good = metric.ticketsGood || metric.good || 0;
+    const bad = metric.ticketsBad || metric.bad || 0;
+    const frSec = metric.firstResponse || metric.firstResponseSec || 0;
+    const resolMin = metric.resolutionTime || metric.resolutionMin || 0;
+    const tph = metric.ticketsPerHour || 0;
+
+    target.tickets = Math.max(0, target.tickets - tickets);
+    target.good = Math.max(0, target.good - good);
+    target.bad = Math.max(0, target.bad - bad);
+    target.firstResponseWeightedSec = Math.max(0, target.firstResponseWeightedSec - (tickets > 0 ? frSec * tickets : 0));
+    target.resolutionWeightedMin = Math.max(0, target.resolutionWeightedMin - (tickets > 0 ? resolMin * tickets : 0));
+    target.ticketsPerHourWeighted = Math.max(0, target.ticketsPerHourWeighted - (tickets > 0 ? tph * tickets : 0));
+  },
+
+  _computeDerived(agentTotals) {
+    const tickets = agentTotals.tickets || 0;
+    const satisfactionPct = tickets > 0 ? Math.round((agentTotals.good / tickets) * 100) : null;
+    const avgFirstRespMin = tickets > 0 ? (agentTotals.firstResponseWeightedSec / tickets) / 60 : null;
+    const avgResolutionMin = tickets > 0 ? (agentTotals.resolutionWeightedMin / tickets) : null;
+    const avgTicketsPerHour = tickets > 0 ? (agentTotals.ticketsPerHourWeighted / tickets) : null;
+    return { satisfactionPct, avgFirstRespMin, avgResolutionMin, avgTicketsPerHour };
+  },
+
+  calculateImpactForWeeksAndOmissions(year, month, teamId = null, weekIndices = null, omissions = []) {
+    const weeklyData = this.getWeeklyMetricsData(year, month);
+    const teams = this.getAllTeams();
+    const agentTeamMap = this._getAgentTeamMap();
+    const normalizedWeeks = this._normalizeWeekIndices(weeklyData, weekIndices);
+
+    // Determine which agents to process
+    let agentsToProcess = [];
+    if (teamId) {
+      const team = teams[teamId];
+      if (team && team.members) agentsToProcess = team.members.map(m => m.name).filter(Boolean);
+    } else {
+      Object.keys(weeklyData || {}).forEach(agentName => agentsToProcess.push(agentName));
+      // also include team members even if missing weekly data (keeps consistent)
+      Object.keys(teams).forEach(tid => {
+        const t = teams[tid];
+        if (!t || !Array.isArray(t.members)) return;
+        t.members.forEach(m => { if (m && m.name) agentsToProcess.push(m.name); });
+      });
+      agentsToProcess = Array.from(new Set(agentsToProcess));
+    }
+
+    const baseByAgent = {};
+    agentsToProcess.forEach(agentName => {
+      const agentTeam = agentTeamMap[agentName] || null;
+      if (teamId && agentTeam !== teamId) return;
+      baseByAgent[agentName] = this._newAgentTotals(agentTeam);
+
+      const byWeek = weeklyData[agentName] || {};
+      normalizedWeeks.forEach(wi => {
+        const wk = byWeek[wi];
+        if (!wk) return;
+        this._addMetricTotals(baseByAgent[agentName], wk);
+      });
+    });
+
+    // Clone base to adjusted
+    const adjustedByAgent = {};
+    Object.keys(baseByAgent).forEach(agentName => {
+      adjustedByAgent[agentName] = { ...baseByAgent[agentName] };
+    });
+
+    const incidentsById = {};
+    this.getAllIncidents().forEach(inc => { incidentsById[inc.id] = inc; });
+
+    const safeOmissions = Array.isArray(omissions) ? omissions : [];
+    safeOmissions.forEach(omit => {
+      const inc = incidentsById[omit.incidentId];
+      if (!inc) return;
+      const incTeams = Array.isArray(inc.affectedTeams) ? inc.affectedTeams : [];
+
+      const mode = omit.mode === 'week' ? 'week' : 'day';
+      const weekIndex = Number.isInteger(omit.weekIndex) ? omit.weekIndex : null;
+
+      Object.keys(adjustedByAgent).forEach(agentName => {
+        const agentTeam = agentTeamMap[agentName] || null;
+        if (!agentTeam) return;
+        if (teamId && agentTeam !== teamId) return;
+        if (!incTeams.includes(agentTeam)) return;
+
+        if (mode === 'day') {
+          const dayMetric = inc.dayMetricsByAgent ? inc.dayMetricsByAgent[agentName] : null;
+          if (!dayMetric) return;
+          this._subtractMetricTotals(adjustedByAgent[agentName], dayMetric);
+        } else {
+          if (weekIndex === null) return;
+          const wkMetric = weeklyData?.[agentName]?.[weekIndex] || null;
+          if (!wkMetric) return;
+          this._subtractMetricTotals(adjustedByAgent[agentName], wkMetric);
+        }
+      });
+    });
+
+    // Build scenarios with derived metrics
+    const scenarioA = {};
+    const scenarioB = {};
+
+    Object.keys(baseByAgent).forEach(agentName => {
+      const base = baseByAgent[agentName];
+      const adj = adjustedByAgent[agentName];
+      const aDerived = this._computeDerived(base);
+      const bDerived = this._computeDerived(adj);
+
+      scenarioA[agentName] = {
+        teamId: base.teamId,
+        totalTickets: base.tickets,
+        totalGood: base.good,
+        totalBad: base.bad,
+        firstResponseWeighted: base.firstResponseWeightedSec,
+        resolutionWeightedMin: base.resolutionWeightedMin,
+        ticketsPerHourWeighted: base.ticketsPerHourWeighted,
+        satisfactionPct: aDerived.satisfactionPct,
+        avgFirstRespMin: aDerived.avgFirstRespMin,
+        avgResolutionMin: aDerived.avgResolutionMin,
+        avgTicketsPerHour: aDerived.avgTicketsPerHour
+      };
+
+      scenarioB[agentName] = {
+        teamId: adj.teamId,
+        totalTickets: adj.tickets,
+        totalGood: adj.good,
+        totalBad: adj.bad,
+        firstResponseWeighted: adj.firstResponseWeightedSec,
+        resolutionWeightedMin: adj.resolutionWeightedMin,
+        ticketsPerHourWeighted: adj.ticketsPerHourWeighted,
+        satisfactionPct: bDerived.satisfactionPct,
+        avgFirstRespMin: bDerived.avgFirstRespMin,
+        avgResolutionMin: bDerived.avgResolutionMin,
+        avgTicketsPerHour: bDerived.avgTicketsPerHour
+      };
+    });
+
+    // Overall aggregation
+    const overall = (scenario) => {
+      let tickets = 0, good = 0, bad = 0;
+      let frWeighted = 0, resolWeighted = 0, tphWeighted = 0;
+      Object.values(scenario).forEach(a => {
+        tickets += a.totalTickets || 0;
+        good += a.totalGood || 0;
+        bad += a.totalBad || 0;
+        frWeighted += a.firstResponseWeighted || 0;
+        resolWeighted += a.resolutionWeightedMin || 0;
+        tphWeighted += a.ticketsPerHourWeighted || 0;
+      });
+      return {
+        totalTickets: tickets,
+        totalGood: good,
+        totalBad: bad,
+        satisfactionPct: tickets > 0 ? Math.round((good / tickets) * 100) : null,
+        avgFirstRespMin: tickets > 0 ? (frWeighted / tickets) / 60 : null,
+        avgResolutionMin: tickets > 0 ? (resolWeighted / tickets) : null,
+        avgTicketsPerHour: tickets > 0 ? (tphWeighted / tickets) : null
+      };
+    };
+
+    const meta = {
+      year,
+      month,
+      teamId: teamId || null,
+      weekIndices: normalizedWeeks,
+      omissions: safeOmissions
+    };
+
+    return { scenarioA, scenarioB, overallA: overall(scenarioA), overallB: overall(scenarioB), meta };
+  },
+
+  // === Weekly vs Incident-day comparison (new Comparador semantics) ===
+  // Base: métricas semanales agregadas (semanas seleccionadas)
+  // Ajustadas: métricas de día (pegadas) de incidencias seleccionadas (o semana completa si mode=week)
+  calculateDayMetricsForSelections(year, month, teamId = null, selections = []) {
+    const weeklyData = this.getWeeklyMetricsData(year, month);
+    const teams = this.getAllTeams();
+    const agentTeamMap = this._getAgentTeamMap();
+
+    // Agents in scope
+    let agentsToProcess = [];
+    if (teamId) {
+      const team = teams[teamId];
+      if (team && team.members) agentsToProcess = team.members.map(m => m.name).filter(Boolean);
+    } else {
+      Object.keys(weeklyData || {}).forEach(agentName => agentsToProcess.push(agentName));
+      Object.keys(teams).forEach(tid => {
+        const t = teams[tid];
+        if (!t || !Array.isArray(t.members)) return;
+        t.members.forEach(m => { if (m && m.name) agentsToProcess.push(m.name); });
+      });
+      agentsToProcess = Array.from(new Set(agentsToProcess));
+    }
+
+    const incidentsById = {};
+    this.getAllIncidents().forEach(inc => { incidentsById[inc.id] = inc; });
+
+    const totalsByAgent = {};
+    agentsToProcess.forEach(agentName => {
+      const agentTeam = agentTeamMap[agentName] || null;
+      if (teamId && agentTeam !== teamId) return;
+      totalsByAgent[agentName] = this._newAgentTotals(agentTeam);
+    });
+
+    const safeSelections = Array.isArray(selections) ? selections : [];
+
+    safeSelections.forEach(sel => {
+      const inc = incidentsById[sel.incidentId];
+      if (!inc) return;
+      const incTeams = Array.isArray(inc.affectedTeams) ? inc.affectedTeams : [];
+      const mode = sel.mode === 'week' ? 'week' : 'day';
+      const weekIndex = Number.isInteger(sel.weekIndex) ? sel.weekIndex : null;
+
+      Object.keys(totalsByAgent).forEach(agentName => {
+        const agentTeam = agentTeamMap[agentName] || null;
+        if (!agentTeam) return;
+        if (teamId && agentTeam !== teamId) return;
+        if (incTeams.length > 0 && !incTeams.includes(agentTeam)) return;
+
+        if (mode === 'day') {
+          const dayMetric = inc.dayMetricsByAgent ? inc.dayMetricsByAgent[agentName] : null;
+          if (!dayMetric) return;
+          this._addMetricTotals(totalsByAgent[agentName], dayMetric);
+        } else {
+          if (weekIndex === null) return;
+          const wkMetric = weeklyData?.[agentName]?.[weekIndex] || null;
+          if (!wkMetric) return;
+          this._addMetricTotals(totalsByAgent[agentName], wkMetric);
+        }
+      });
+    });
+
+    // Build scenario with derived metrics
+    const scenario = {};
+    Object.keys(totalsByAgent).forEach(agentName => {
+      const t = totalsByAgent[agentName];
+      const d = this._computeDerived(t);
+      scenario[agentName] = {
+        teamId: t.teamId,
+        totalTickets: t.tickets,
+        totalGood: t.good,
+        totalBad: t.bad,
+        firstResponseWeighted: t.firstResponseWeightedSec,
+        resolutionWeightedMin: t.resolutionWeightedMin,
+        ticketsPerHourWeighted: t.ticketsPerHourWeighted,
+        satisfactionPct: d.satisfactionPct,
+        avgFirstRespMin: d.avgFirstRespMin,
+        avgResolutionMin: d.avgResolutionMin,
+        avgTicketsPerHour: d.avgTicketsPerHour
+      };
+    });
+
+    const overall = (() => {
+      let tickets = 0, good = 0, bad = 0;
+      let frWeighted = 0, resolWeighted = 0, tphWeighted = 0;
+      Object.values(scenario).forEach(a => {
+        tickets += a.totalTickets || 0;
+        good += a.totalGood || 0;
+        bad += a.totalBad || 0;
+        frWeighted += a.firstResponseWeighted || 0;
+        resolWeighted += a.resolutionWeightedMin || 0;
+        tphWeighted += a.ticketsPerHourWeighted || 0;
+      });
+      return {
+        totalTickets: tickets,
+        totalGood: good,
+        totalBad: bad,
+        satisfactionPct: tickets > 0 ? Math.round((good / tickets) * 100) : null,
+        avgFirstRespMin: tickets > 0 ? (frWeighted / tickets) / 60 : null,
+        avgResolutionMin: tickets > 0 ? (resolWeighted / tickets) : null,
+        avgTicketsPerHour: tickets > 0 ? (tphWeighted / tickets) : null
+      };
+    })();
+
+    const meta = { year, month, teamId: teamId || null, selections: safeSelections };
+    return { scenario, overall, meta };
+  },
+
+  // Backwards-compatible wrapper (kept for legacy UI naming)
+  calculateCSATScenarios(year, month, teamId = null) {
+    const { scenarioA, scenarioB } = this.calculateIncidentImpactScenarios(year, month, teamId);
+    // Map to legacy shape used by older code (only CSAT)
+    const a = {};
+    const b = {};
+    Object.keys(scenarioA).forEach(name => {
+      a[name] = {
+        totalTickets: scenarioA[name].totalTickets,
+        totalGood: scenarioA[name].totalGood,
+        csat: scenarioA[name].satisfactionPct,
+        teamId: scenarioA[name].teamId
+      };
+    });
+    Object.keys(scenarioB).forEach(name => {
+      b[name] = {
+        totalTickets: scenarioB[name].totalTickets,
+        totalGood: scenarioB[name].totalGood,
+        csat: scenarioB[name].satisfactionPct,
+        teamId: scenarioB[name].teamId
+      };
+    });
+    return { scenarioA: a, scenarioB: b };
   }
 };
 

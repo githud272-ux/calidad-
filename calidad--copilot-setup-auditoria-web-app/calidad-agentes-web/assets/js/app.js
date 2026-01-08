@@ -6,6 +6,8 @@ const App = {
   charts: {},
   memberModalMode: 'add',
   memberOriginalEmail: '',
+  _incidentHandlersBound: false,
+  _incidentCompareHandlersBound: false,
 
   // Parse 'YYYY-MM-DD' as local date (avoid UTC shift)
   parseLocalDate(dateStr) {
@@ -20,8 +22,19 @@ const App = {
 
   // Year override: allow selecting Dec 2025 when current year is 2026
   getEffectiveYearForMonth(monthIndex) {
-    const cy = new Date().getFullYear();
+    const now = new Date();
+    const cy = now.getFullYear();
+    const cm = now.getMonth();
+
+    // Explicit override: allow selecting Dec 2025 when current year is 2026
     if (monthIndex === 11 && cy === 2026) return 2025;
+
+    // Cross-year heuristic for the "current + 2 months" selector:
+    // When we are in Nov/Dec and the user selects Jan/Feb, that selection refers to next year.
+    // (Avoids saving Jan 2026 data under 2025-0, etc.)
+    if (cm === 10 && monthIndex === 0) return cy + 1; // Nov -> Jan
+    if (cm === 11 && (monthIndex === 0 || monthIndex === 1)) return cy + 1; // Dec -> Jan/Feb
+
     return cy;
   },
 
@@ -375,6 +388,209 @@ const App = {
     modal.style.display = 'none';
   },
 
+  _normalizeTsvHeaderCell(value) {
+    return String(value || '')
+      .replace(/\u00a0/g, ' ')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[\(\)\[\]\{\}:.,;\/\\]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  },
+
+  _getExpectedMetricsTsvHeader() {
+    return [
+      { key: 'agent', label: 'Nombre del agente asignado', aliases: ['Nombre del agente asignado', 'Agente', 'Nombre del agente'] },
+      { key: 'tickets', label: 'Tickets resueltos', aliases: ['Tickets resueltos', 'Tickets'] },
+      { key: 'ticketsAvgDaily', label: 'Tickets resueltos - Promedio diario', aliases: ['Tickets resueltos - Promedio diario', 'Tickets resueltos – Promedio diario'] },
+      { key: 'ticketsBad', label: 'Tickets con satisfacción mala', aliases: ['Tickets con satisfacción mala', 'Tickets con satisfaccion mala'] },
+      { key: 'ticketsGood', label: 'Tickets con satisfacción buena', aliases: ['Tickets con satisfacción buena', 'Tickets con satisfaccion buena'] },
+      { key: 'firstRespSec', label: 'Tiempo de primera respuesta (s)', aliases: ['Tiempo de primera respuesta (s)', 'Tiempo primera respuesta (s)'] },
+      { key: 'resolutionMin', label: 'Tiempo de resolución completa (min)', aliases: ['Tiempo de resolución completa (min)', 'Tiempo de resolucion completa (min)'] },
+      { key: 'firstRespMin', label: 'Tiempo de primera respuesta (min)', aliases: ['Tiempo de primera respuesta (min)', 'Tiempo primera respuesta (min)'] }
+    ];
+  },
+
+  _formatExpectedMetricsHeaderLine() {
+    return this._getExpectedMetricsTsvHeader().map(c => c.label).join('\t');
+  },
+
+  _parseRequiredNumber(raw, { kind, row, agentName, fieldLabel }) {
+    const value = String(raw ?? '').trim();
+    if (value === '') {
+      return { ok: false, error: `Fila ${row}${agentName ? ` (${agentName})` : ''}: falta ${fieldLabel}.` };
+    }
+
+    const normalized = value.replace(',', '.');
+    const num = kind === 'int' ? parseInt(normalized, 10) : parseFloat(normalized);
+    if (!Number.isFinite(num)) {
+      return { ok: false, error: `Fila ${row}${agentName ? ` (${agentName})` : ''}: ${fieldLabel} no es numérico.` };
+    }
+    if (num < 0) {
+      return { ok: false, error: `Fila ${row}${agentName ? ` (${agentName})` : ''}: ${fieldLabel} no puede ser negativo.` };
+    }
+    return { ok: true, value: num };
+  },
+
+  parseStrictMetricsTsv(raw) {
+    const text = String(raw || '').trim();
+    if (!text) {
+      return { fatal: true, imported: 0, skipped: 0, errors: ['Pegue los datos (tabulados) antes de importar.'] };
+    }
+
+    const lines = text
+      .split(/\r?\n/)
+      .map(l => l.trimEnd())
+      .filter(l => l.trim() !== '');
+
+    if (lines.length < 2) {
+      return { fatal: true, imported: 0, skipped: 0, errors: ['Pegue datos con encabezados y al menos una fila.'] };
+    }
+
+    const expected = this._getExpectedMetricsTsvHeader();
+    const headerCellsRaw = lines[0].split('\t');
+    const headerCells = headerCellsRaw.map(c => this._normalizeTsvHeaderCell(c));
+    if (headerCells.length < expected.length) {
+      return {
+        fatal: true,
+        imported: 0,
+        skipped: 0,
+        errors: [
+          `Formato inválido: se esperan ${expected.length} columnas con encabezados. Ejemplo de encabezado esperado:\n${this._formatExpectedMetricsHeaderLine()}`
+        ]
+      };
+    }
+
+    for (let i = 0; i < expected.length; i++) {
+      const exp = expected[i];
+      const actual = headerCells[i] || '';
+      const ok = exp.aliases
+        .map(a => this._normalizeTsvHeaderCell(a))
+        .some(a => a === actual);
+      if (!ok) {
+        return {
+          fatal: true,
+          imported: 0,
+          skipped: 0,
+          errors: [
+            `Formato inválido: el encabezado de la columna ${i + 1} no coincide. Se esperaba: "${exp.label}".\nEncabezado esperado completo:\n${this._formatExpectedMetricsHeaderLine()}`
+          ]
+        };
+      }
+    }
+
+    // Permite columnas extra solo si están vacías
+    if (headerCells.length > expected.length) {
+      const extras = headerCellsRaw.slice(expected.length).map(c => String(c || '').trim());
+      const hasNonEmptyExtra = extras.some(v => v !== '');
+      if (hasNonEmptyExtra) {
+        return {
+          fatal: true,
+          imported: 0,
+          skipped: 0,
+          errors: [`Formato inválido: hay columnas adicionales no esperadas (se esperan exactamente ${expected.length}).`]
+        };
+      }
+    }
+
+    const rows = [];
+    let imported = 0;
+    let skipped = 0;
+    const errors = [];
+
+    for (let idx = 1; idx < lines.length; idx++) {
+      const rowNumber = idx + 1; // 1-based en archivo, incluyendo encabezado
+      const line = lines[idx];
+      const values = line.split('\t');
+
+      // Permite extras vacías, pero si faltan columnas es fila inválida
+      if (values.length < expected.length) {
+        skipped++;
+        errors.push(`Fila ${rowNumber}: faltan columnas (se esperan ${expected.length}).`);
+        continue;
+      }
+      if (values.length > expected.length) {
+        const extras = values.slice(expected.length).map(v => String(v || '').trim());
+        const hasNonEmptyExtra = extras.some(v => v !== '');
+        if (hasNonEmptyExtra) {
+          skipped++;
+          errors.push(`Fila ${rowNumber}: tiene columnas adicionales no esperadas.`);
+          continue;
+        }
+      }
+
+      let agentName = String(values[0] || '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/[^A-Za-zÁÉÍÓÚÜáéíóúüÑñ0-9\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (!agentName || agentName.length < 2) {
+        skipped++;
+        errors.push(`Fila ${rowNumber}: nombre de agente inválido.`);
+        continue;
+      }
+
+      const ticketsR = this._parseRequiredNumber(values[1], { kind: 'int', row: rowNumber, agentName, fieldLabel: 'Tickets resueltos' });
+      const avgDailyR = this._parseRequiredNumber(values[2], { kind: 'float', row: rowNumber, agentName, fieldLabel: 'Tickets resueltos - Promedio diario' });
+      const badR = this._parseRequiredNumber(values[3], { kind: 'int', row: rowNumber, agentName, fieldLabel: 'Tickets con satisfacción mala' });
+      const goodR = this._parseRequiredNumber(values[4], { kind: 'int', row: rowNumber, agentName, fieldLabel: 'Tickets con satisfacción buena' });
+      const frSecR = this._parseRequiredNumber(values[5], { kind: 'float', row: rowNumber, agentName, fieldLabel: 'Tiempo de primera respuesta (s)' });
+      const resolMinR = this._parseRequiredNumber(values[6], { kind: 'float', row: rowNumber, agentName, fieldLabel: 'Tiempo de resolución completa (min)' });
+      const frMinR = this._parseRequiredNumber(values[7], { kind: 'float', row: rowNumber, agentName, fieldLabel: 'Tiempo de primera respuesta (min)' });
+
+      const firstError = [ticketsR, avgDailyR, badR, goodR, frSecR, resolMinR, frMinR].find(r => !r.ok);
+      if (firstError) {
+        skipped++;
+        errors.push(firstError.error);
+        continue;
+      }
+
+      const frMinFromSec = frSecR.value / 60;
+      if (Math.abs(frMinFromSec - frMinR.value) > 0.6) {
+        skipped++;
+        errors.push(`Fila ${rowNumber} (${agentName}): inconsistencia entre 1ra respuesta (s) y (min).`);
+        continue;
+      }
+
+      const tickets = ticketsR.value;
+      const ticketsBad = badR.value;
+      const ticketsGood = goodR.value;
+      const firstResponse = frSecR.value;
+      const resolutionTime = resolMinR.value;
+
+      const ticketsPerHour = avgDailyR.value; // se usa como proxy de demanda
+      const califPct = (tickets > 0) ? ((ticketsGood / tickets) * 100) : 0;
+
+      rows.push({
+        rowNumber,
+        agentName,
+        metrics: {
+          tickets,
+          ticketsBad,
+          ticketsGood,
+          firstResponse,
+          resolutionTime,
+          ticketsPerHour,
+          califPct
+        }
+      });
+      imported++;
+    }
+
+    if (imported === 0) {
+      return {
+        fatal: false,
+        imported: 0,
+        skipped,
+        errors: errors.length ? errors : ['No se pudo interpretar ninguna fila válida.']
+      };
+    }
+
+    return { fatal: false, imported, skipped, errors, rows };
+  },
+
   importFromExcel() {
     const pasteArea = document.getElementById('excelPasteArea');
     const data = pasteArea.value.trim();
@@ -414,49 +630,31 @@ const App = {
       }
     }
 
-    const lines = data.split('\n');
-    if (lines.length < 2) {
-      alert('Los datos parecen estar vacíos o mal formateados.');
+    const parsedTsv = this.parseStrictMetricsTsv(data);
+    if (parsedTsv.fatal) {
+      alert(`❌ ${parsedTsv.errors[0]}`);
       return;
     }
 
-    // Skip header row (first line)
-    const dataLines = lines.slice(1);
-    
     let imported = 0;
-    let skipped = 0;
-    const errors = [];
+    let skipped = parsedTsv.skipped || 0;
+    const errors = Array.isArray(parsedTsv.errors) ? [...parsedTsv.errors] : [];
 
-    for (let i = 0; i < dataLines.length; i++) {
-      const line = dataLines[i].trim();
-      if (!line) continue;
+    const teams = DataManager.getAllTeams();
 
-      const values = line.split('\t');
-      
-      if (values.length < 6) {
-        skipped++;
-        continue;
-      }
+    // Save según modo seleccionado
+    const parsed = this.parseSelectedMonthValue(selectedMonth);
+    const monthIndex = parsed.monthIndex;
+    const currentYear = parsed.yearOverride ?? this.getEffectiveYearForMonth(monthIndex);
 
-      // Clean agent name: keep only letters (including acentos), numbers, and spaces
-      let agentName = values[0]
-        .replace(/&nbsp;/g, ' ')
-        .replace(/[^A-Za-zÁÉÍÓÚÜáéíóúüÑñ0-9\s]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
+    for (const row of (parsedTsv.rows || [])) {
+      const agentName = row.agentName;
+      const metrics = row.metrics;
 
-      if (!agentName || agentName.length < 2) {
-        skipped++;
-        continue;
-      }
-
-      // Validar si el filtro es "todos" (asume value 'all' o similar)
-      const teams = DataManager.getAllTeams();
       let agentExists = false;
       let targetTeams = [];
       // En la UI el valor vacío representa "Todos los Equipos"
       if (selectedTeam === 'all' || selectedTeam === '') {
-        // Aplica a todos los equipos
         for (const teamId in teams) {
           const team = teams[teamId];
           if (team.members && team.members.some(m => m.name === agentName)) {
@@ -465,7 +663,6 @@ const App = {
           }
         }
       } else {
-        // Solo equipo específico
         const team = teams[selectedTeam];
         if (team && team.members && team.members.some(m => m.name === agentName)) {
           agentExists = true;
@@ -473,41 +670,15 @@ const App = {
         }
       }
       if (!agentExists) {
-        errors.push(`${agentName} no encontrado en el equipo`);
+        errors.push(`Fila ${row.rowNumber} (${agentName}): no encontrado en el equipo seleccionado.`);
         skipped++;
         continue;
       }
 
-      // Parse numeric values (handle comma as decimal separator)
-      const tickets = parseInt(values[1]) || 0;
-      const ticketsPerHourRaw = parseFloat(values[2].replace(',', '.')) || 0; // Promedio diario from Excel
-      const ticketsBad = parseInt(values[3]) || 0;
-      const ticketsGood = parseInt(values[4]) || 0;
-      const firstResponse = parseFloat(values[5].replace(',', '.')) || 0;
-      const resolutionTime = parseFloat(values[6].replace(',', '.')) || 0;
-      const firstResponseMinutes = values[7] ? parseFloat(values[7].replace(',', '.')) || 0 : 0;
-
-      // Use the ticketsPerHour from Excel (promedio diario) if available, otherwise calculate
-      const ticketsPerHour = ticketsPerHourRaw > 0 ? ticketsPerHourRaw : (tickets > 0 ? tickets / 8 : 0);
-      const califPct = (tickets > 0) ? ((ticketsGood / tickets) * 100) : 0;
-
-      // Save según modo seleccionado
-      const parsed = this.parseSelectedMonthValue(selectedMonth);
-      const monthIndex = parsed.monthIndex;
-      const currentYear = parsed.yearOverride ?? this.getEffectiveYearForMonth(monthIndex);
-      const metrics = {
-        tickets,
-        ticketsBad,
-        ticketsGood,
-        firstResponse,
-        resolutionTime,
-        ticketsPerHour,
-        firstResponseMinutes,
-        califPct
-      };
       if (excelImportMode === 'rango') {
         const overlappingWeeks = this.getWeeksOverlappingRange(excelRangeStart, excelRangeEnd);
         if (!overlappingWeeks.length) {
+          errors.push('No hay semanas que intersecten el rango indicado.');
           skipped++;
           continue;
         }
@@ -521,7 +692,7 @@ const App = {
           DataManager.saveWeeklyMetric(agentName, {
             year: currentYear,
             month: monthIndex,
-            week: parseInt(selectedWeek),
+            week: parseInt(selectedWeek, 10),
             team: teamId
           }, metrics);
         });
@@ -533,10 +704,11 @@ const App = {
     this.closeExcelImportModal();
     
     if (imported > 0) {
-      alert(`✅ ${imported} agente(s) importados correctamente.\n${skipped > 0 ? `⚠️ ${skipped} filas omitidas.` : ''}\n${errors.length > 0 ? `\nErrores:\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? `\n...y ${errors.length - 5} más` : ''}` : ''}`);
+      alert(`✅ ${imported} agente(s) importados correctamente.\n${skipped > 0 ? `⚠️ ${skipped} filas omitidas.` : ''}\n${errors.length > 0 ? `\nDetalles/Errores:\n${errors.slice(0, 8).join('\n')}${errors.length > 8 ? `\n...y ${errors.length - 8} más` : ''}` : ''}`);
       this.loadWeeklyMetrics();
     } else {
-      alert('❌ No se pudo importar ningún dato. Verifique que:\n- Los agentes existan en el equipo seleccionado\n- Los datos estén en el formato correcto (separados por tabulación)\n- Haya seleccionado un mes');
+      const detail = errors.length ? `\n\nDetalles:\n${errors.slice(0, 8).join('\n')}${errors.length > 8 ? `\n...y ${errors.length - 8} más` : ''}` : '';
+      alert(`❌ No se pudo importar ningún dato.${detail}`);
     }
   },
   
@@ -788,6 +960,7 @@ const App = {
     renderSelect(document.getElementById('filterMonthMetrics'));
     renderSelect(document.getElementById('filterMonthlyMetrics'));
     renderSelect(document.getElementById('filterMonthConnectionHours'));
+    renderSelect(document.getElementById('incidentCompareMonth'));
   },
 
   // Setup all event listeners
@@ -1483,6 +1656,10 @@ const App = {
         document.getElementById('statisticsView').classList.remove('hidden');
         this.initializeStatisticsFilters();
         this.loadStatistics();
+        break;
+      case 'incidents':
+        document.getElementById('incidentsView').classList.remove('hidden');
+        this.loadIncidentsView();
         break;
     }
   },
@@ -4096,7 +4273,7 @@ const App = {
     // Add week headers - USE ALL CONFIGURED WEEKS
     weeks.forEach((week, index) => {
       tableHTML += `
-        <th colspan="${isEditor ? 10 : 9}" style="background: #f0f9ff; text-align: center; font-size: 0.8rem; padding: 0.5rem;">
+        <th colspan="${isEditor ? 9 : 8}" style="background: #f0f9ff; text-align: center; font-size: 0.8rem; padding: 0.5rem;">
           Semana ${index + 1}: ${week.startDate.split('-')[2]}/${week.startDate.split('-')[1]} al ${week.endDate.split('-')[2]}/${week.endDate.split('-')[1]}
         </th>
       `;
@@ -4104,7 +4281,7 @@ const App = {
     
     // Add accumulated month header
     tableHTML += `
-      <th colspan="${isEditor ? 10 : 9}" style="background: #f0fdf4; text-align: center; font-weight: 700; font-size: 0.8rem; padding: 0.5rem;">
+      <th colspan="${isEditor ? 9 : 8}" style="background: #f0fdf4; text-align: center; font-weight: 700; font-size: 0.8rem; padding: 0.5rem;">
         ACUMULADO DEL MES
       </th>
     `;
@@ -4120,7 +4297,6 @@ const App = {
         <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">Calif. Buena</th>
         <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">T. Resp. (s)</th>
         <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">T. Resol. (m)</th>
-        <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">T. Resp. (min)</th>
         <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">% Calif.</th>
         <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">% Calidad</th>
         ${isEditor ? '<th style="font-size: 0.7rem; background: #f8fafc;">Acción</th>' : ''}
@@ -4135,7 +4311,6 @@ const App = {
       <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">Calif. Buena</th>
       <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">T. Resp. (s)</th>
       <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">T. Resol. (m)</th>
-      <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">T. Resp. (min)</th>
       <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">% Calif.</th>
       <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">% Calidad</th>
       ${isEditor ? '<th style="font-size: 0.7rem; background: #f0fdf4;"></th>' : ''}
@@ -4189,7 +4364,6 @@ const App = {
         const firstResponse = manual.firstResponse || 0;
         const resolutionTime = manual.resolutionTime || 0;
         const ticketsPerHour = manual.ticketsPerHour || 0;
-        const firstResponseMinutes = firstResponse ? (firstResponse / 60) : 0;
         
         // Calculate % Calif automatically: (ticketsBad + ticketsGood) / tickets * 100
         let percentCalif = '-';
@@ -4215,7 +4389,6 @@ const App = {
           <td style="text-align: center;">${ticketsGood || '-'}</td>
           <td style="text-align: center;">${firstResponse || '-'}</td>
           <td style="text-align: center;">${resolutionTime || '-'}</td>
-          <td style="text-align: center;">${firstResponseMinutes ? firstResponseMinutes.toFixed(1) : '-'}</td>
           <td style="text-align: center; font-weight: 600; color: #0ea5e9;">${percentCalif}</td>
           <td style="text-align: center; color: #38CEA6; font-weight: 600;">${qualityPercent}</td>
           ${isEditor ? `<td style="text-align: center;"><button class="btn-mini" onclick="App.openManualMetricsModal('${agentName}', ${weekIndex}, ${currentYear}, ${month})" title="Editar métricas"><i class="fas fa-edit"></i></button></td>` : ''}
@@ -4225,7 +4398,6 @@ const App = {
       // Add accumulated data
       const avgFirstResponse = monthlyTotals.weekCount > 0 ? Math.round(monthlyTotals.firstResponse / monthlyTotals.weekCount) : 0;
       const avgResolutionTime = monthlyTotals.weekCount > 0 ? Math.round(monthlyTotals.resolutionTime / monthlyTotals.weekCount) : 0;
-      const avgFirstResponseMinutes = avgFirstResponse ? (avgFirstResponse / 60).toFixed(1) : '-';
       const avgQuality = monthlyTotals.qualityCount > 0 ? Math.round(monthlyTotals.quality / monthlyTotals.qualityCount) : 0;
       const avgTicketsPerHour = '-';
       
@@ -4240,7 +4412,6 @@ const App = {
         <td style="text-align: center; background: #f0fdf4; font-weight: 700;">${monthlyTotals.ticketsGood || '-'}</td>
         <td style="text-align: center; background: #f0fdf4; font-weight: 700;">${avgFirstResponse || '-'}</td>
         <td style="text-align: center; background: #f0fdf4; font-weight: 700;">${avgResolutionTime || '-'}</td>
-        <td style="text-align: center; background: #f0fdf4; font-weight: 700;">${avgFirstResponseMinutes}</td>
         <td style="text-align: center; background: #f0fdf4; font-weight: 700; color: #0ea5e9;">${totalPercentCalif}%</td>
         <td style="text-align: center; background: #f0fdf4; color: #38CEA6; font-weight: 700;">${avgQuality || '-'}%</td>
         ${isEditor ? '<td style="background: #f0fdf4;"></td>' : ''}
@@ -4251,7 +4422,7 @@ const App = {
     
     // Calculate and add PROMEDIO (average) row
     if (agentsList.length > 0) {
-      const avgRow = { tickets: [], ticketsPerHour: [], ticketsBad: [], ticketsGood: [], firstResponse: [], resolutionTime: [], firstResponseMinutes: [], quality: [], qualityCount: [], agentCount: [] };
+      const avgRow = { tickets: [], ticketsPerHour: [], ticketsBad: [], ticketsGood: [], firstResponse: [], resolutionTime: [], quality: [], qualityCount: [], agentCount: [] };
       const monthlyAvg = { tickets: 0, ticketsPerHour: 0, ticketsBad: 0, ticketsGood: 0, firstResponse: 0, resolutionTime: 0, quality: 0, qualityCount: 0, agentCount: 0, weekCount: 0 };
       
       // Sum up all agent metrics for each week and count agents with data
@@ -4271,7 +4442,6 @@ const App = {
             avgRow.ticketsGood[weekIndex] = (avgRow.ticketsGood[weekIndex] || 0) + (weekData.ticketsGood || 0);
             avgRow.firstResponse[weekIndex] = (avgRow.firstResponse[weekIndex] || 0) + (weekData.firstResponse || 0);
             avgRow.resolutionTime[weekIndex] = (avgRow.resolutionTime[weekIndex] || 0) + (weekData.resolutionTime || 0);
-            avgRow.firstResponseMinutes[weekIndex] = (avgRow.firstResponseMinutes[weekIndex] || 0) + ((weekData.firstResponse || 0) / 60);
             // Count agents with data for this week
             avgRow.agentCount[weekIndex] = (avgRow.agentCount[weekIndex] || 0) + 1;
           }
@@ -4346,7 +4516,6 @@ const App = {
         const avgTicketsPerHour = agentCountForWeek > 0 ? (avgRow.ticketsPerHour[weekIndex] || 0) / agentCountForWeek : 0;
         const avgFirstResp = agentCountForWeek > 0 ? (avgRow.firstResponse[weekIndex] || 0) / agentCountForWeek : 0;
         const avgResol = agentCountForWeek > 0 ? (avgRow.resolutionTime[weekIndex] || 0) / agentCountForWeek : 0;
-        const avgFirstRespMin = avgFirstResp > 0 ? (avgFirstResp / 60) : 0;
         
         // Calculated percentage from totals
         const totalCalifPct = totalTickets > 0 ? ((totalBad + totalGood) / totalTickets * 100) : 0;
@@ -4361,7 +4530,6 @@ const App = {
           <td style="text-align: center;">${totalGood > 0 ? totalGood.toFixed(0) : '-'}</td>
           <td style="text-align: center;">${avgFirstResp > 0 ? avgFirstResp.toFixed(1) : '-'}</td>
           <td style="text-align: center;">${avgResol > 0 ? avgResol.toFixed(1) : '-'}</td>
-          <td style="text-align: center; color: #0ea5e9;">${avgFirstRespMin > 0 ? avgFirstRespMin.toFixed(1) : '-'}</td>
           <td style="text-align: center; color: #0ea5e9;">${totalCalifPct > 0 ? totalCalifPct.toFixed(1) + '%' : '-'}</td>
           <td style="text-align: center; color: #38CEA6;">${avgQuality > 0 ? avgQuality.toFixed(1) + '%' : '-'}</td>
           ${isEditor ? '<td></td>' : ''}
@@ -4375,7 +4543,6 @@ const App = {
       const monthlyAvgTicketsPerHour = monthlyAvg.weekCount > 0 ? monthlyAvg.ticketsPerHour / monthlyAvg.weekCount : 0;
       const monthlyAvgFirstResp = monthlyAvg.weekCount > 0 ? monthlyAvg.firstResponse / monthlyAvg.weekCount : 0;
       const monthlyAvgResol = monthlyAvg.weekCount > 0 ? monthlyAvg.resolutionTime / monthlyAvg.weekCount : 0;
-      const monthlyAvgFirstRespMin = monthlyAvgFirstResp > 0 ? (monthlyAvgFirstResp / 60) : 0;
       const monthlyTotalCalifPct = monthlyTotalTickets > 0 ? ((monthlyTotalBad + monthlyTotalGood) / monthlyTotalTickets * 100) : 0;
       const monthlyAvgQuality = monthlyAvg.qualityCount > 0 ? (monthlyAvg.quality / monthlyAvg.qualityCount) : 0;
       
@@ -4386,7 +4553,6 @@ const App = {
         <td style="text-align: center; background: #f0fdf4;">${monthlyTotalGood > 0 ? monthlyTotalGood.toFixed(0) : '-'}</td>
         <td style="text-align: center; background: #f0fdf4;">${monthlyAvgFirstResp > 0 ? monthlyAvgFirstResp.toFixed(1) : '-'}</td>
         <td style="text-align: center; background: #f0fdf4;">${monthlyAvgResol > 0 ? monthlyAvgResol.toFixed(1) : '-'}</td>
-        <td style="text-align: center; background: #f0fdf4; color: #0ea5e9;">${monthlyAvgFirstRespMin > 0 ? monthlyAvgFirstRespMin.toFixed(1) : '-'}</td>
         <td style="text-align: center; background: #f0fdf4; color: #0ea5e9;">${monthlyTotalCalifPct > 0 ? monthlyTotalCalifPct.toFixed(1) + '%' : '-'}</td>
         <td style="text-align: center; background: #f0fdf4; color: #38CEA6;">${monthlyAvgQuality > 0 ? monthlyAvgQuality.toFixed(1) + '%' : '-'}</td>
         ${isEditor ? '<td style="background: #f0fdf4;"></td>' : ''}
@@ -4426,7 +4592,7 @@ const App = {
     // Add week headers
     weeks.forEach((week, index) => {
       tableHTML += `
-        <th colspan="${isEditor ? 10 : 9}" style="background: #f0f9ff; text-align: center; font-size: 0.8rem; padding: 0.5rem;">
+        <th colspan="${isEditor ? 9 : 8}" style="background: #f0f9ff; text-align: center; font-size: 0.8rem; padding: 0.5rem;">
           Semana ${index + 1}: ${week.startDate.split('-')[2]}/${week.startDate.split('-')[1]} al ${week.endDate.split('-')[2]}/${week.endDate.split('-')[1]}
         </th>
       `;
@@ -4434,7 +4600,7 @@ const App = {
     
     // Add accumulated month header
     tableHTML += `
-      <th colspan="${isEditor ? 10 : 9}" style="background: #f0fdf4; text-align: center; font-weight: 700; font-size: 0.8rem; padding: 0.5rem;">
+      <th colspan="${isEditor ? 9 : 8}" style="background: #f0fdf4; text-align: center; font-weight: 700; font-size: 0.8rem; padding: 0.5rem;">
         ACUMULADO DEL MES
       </th>
     `;
@@ -4450,7 +4616,6 @@ const App = {
         <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">Calif. Buena</th>
         <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">T. Resp. (s)</th>
         <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">T. Resol. (m)</th>
-        <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">T. Resp. (min)</th>
         <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">% Calif.</th>
         <th style="font-size: 0.7rem; background: #f8fafc; white-space: nowrap;">% Calidad</th>
         ${isEditor ? '<th style="font-size: 0.7rem; background: #f8fafc;">Acción</th>' : ''}
@@ -4465,7 +4630,6 @@ const App = {
       <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">Calif. Buena</th>
       <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">T. Resp. (s)</th>
       <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">T. Resol. (m)</th>
-      <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">T. Resp. (min)</th>
       <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">% Calif.</th>
       <th style="font-size: 0.7rem; background: #f0fdf4; white-space: nowrap;">% Calidad</th>
       ${isEditor ? '<th style="font-size: 0.7rem; background: #f0fdf4;"></th>' : ''}
@@ -4542,9 +4706,6 @@ const App = {
           monthlyTotals.qualityCount++;
         }
         
-        // Calculate T. Resp. (min) from T. Resp. (s)
-        const firstResponseMin = firstResponse > 0 ? (firstResponse / 60).toFixed(1) : '-';
-        
         tableHTML += `
           <td style="text-align: center;">${tickets || '-'}</td>
           <td style="text-align: center; color: #8b5cf6;">${ticketsPerHour > 0 ? ticketsPerHour.toFixed(1) : '-'}</td>
@@ -4552,7 +4713,6 @@ const App = {
           <td style="text-align: center;">${ticketsGood || '-'}</td>
           <td style="text-align: center;">${firstResponse || '-'}</td>
           <td style="text-align: center;">${resolutionTime || '-'}</td>
-          <td style="text-align: center; color: #0ea5e9;">${firstResponseMin}</td>
           <td style="text-align: center;">${califPct > 0 ? califPct + '%' : '-'}</td>
           <td style="text-align: center; color: #38CEA6;">${qualityPct > 0 ? qualityPct + '%' : '-'}</td>
           ${isEditor ? `<td style="text-align: center;"><button class="btn-mini" onclick="App.openManualMetricsModal('${agentName}', ${weekIndex}, ${currentYear}, ${month})"><i class="fas fa-edit"></i></button></td>` : ''}
@@ -4570,8 +4730,6 @@ const App = {
         monthlyCalifPct = ((monthlyTotals.ticketsBad + monthlyTotals.ticketsGood) / monthlyTotals.tickets * 100).toFixed(1);
       }
       
-      const avgFirstResponseMin = avgFirstResponse > 0 ? (avgFirstResponse / 60).toFixed(1) : '-';
-      
       tableHTML += `
         <td style="text-align: center; background: #f0fdf4; font-weight: 600;">${monthlyTotals.tickets || '-'}</td>
         <td style="text-align: center; background: #f0fdf4; color: #8b5cf6; font-weight: 600;">${avgTicketsPerHour}</td>
@@ -4579,7 +4737,6 @@ const App = {
         <td style="text-align: center; background: #f0fdf4;">${monthlyTotals.ticketsGood || '-'}</td>
         <td style="text-align: center; background: #f0fdf4;">${avgFirstResponse || '-'}</td>
         <td style="text-align: center; background: #f0fdf4;">${avgResolution || '-'}</td>
-        <td style="text-align: center; background: #f0fdf4; color: #0ea5e9;">${avgFirstResponseMin}</td>
         <td style="text-align: center; background: #f0fdf4;">${monthlyCalifPct > 0 ? monthlyCalifPct + '%' : '-'}</td>
         <td style="text-align: center; background: #f0fdf4; color: #38CEA6; font-weight: 600;">${avgQuality > 0 ? avgQuality + '%' : '-'}</td>
         ${isEditor ? '<td style="background: #f0fdf4;"></td>' : ''}
@@ -4683,7 +4840,6 @@ const App = {
         const avgTph = agentCountForWeek > 0 ? (avgRow.ticketsPerHour[weekIndex] || 0) / agentCountForWeek : 0;
         const avgFirstResp = agentCountForWeek > 0 ? (avgRow.firstResponse[weekIndex] || 0) / agentCountForWeek : 0;
         const avgResol = agentCountForWeek > 0 ? (avgRow.resolutionTime[weekIndex] || 0) / agentCountForWeek : 0;
-        const avgFirstRespMin = avgFirstResp > 0 ? (avgFirstResp / 60) : 0;
         const totalCalifPct = totalTickets > 0 ? ((totalBad + totalGood) / totalTickets * 100) : 0;
         const avgQuality = (avgRow.qualityCount[weekIndex] || 0) > 0 ? (avgRow.quality[weekIndex] / avgRow.qualityCount[weekIndex]) : 0;
 
@@ -4694,7 +4850,6 @@ const App = {
           <td style="text-align: center;">${totalGood > 0 ? totalGood.toFixed(0) : '-'}</td>
           <td style="text-align: center;">${avgFirstResp > 0 ? avgFirstResp.toFixed(1) : '-'}</td>
           <td style="text-align: center;">${avgResol > 0 ? avgResol.toFixed(1) : '-'}</td>
-          <td style="text-align: center; color: #0ea5e9;">${avgFirstRespMin > 0 ? avgFirstRespMin.toFixed(1) : '-'}</td>
           <td style="text-align: center;">${totalCalifPct > 0 ? totalCalifPct.toFixed(1) + '%' : '-'}</td>
           <td style="text-align: center; color: #38CEA6;">${avgQuality > 0 ? avgQuality.toFixed(1) + '%' : '-'}</td>
           ${isEditor ? '<td></td>' : ''}
@@ -4707,7 +4862,6 @@ const App = {
       const monthlyAvgTph = monthlyAvg.ticketsPerHourCount > 0 ? (monthlyAvg.ticketsPerHour / monthlyAvg.ticketsPerHourCount) : 0;
       const monthlyAvgFirstResp = monthlyAvg.weekCount > 0 ? (monthlyAvg.firstResponse / monthlyAvg.weekCount) : 0;
       const monthlyAvgResol = monthlyAvg.weekCount > 0 ? (monthlyAvg.resolutionTime / monthlyAvg.weekCount) : 0;
-      const monthlyAvgFirstRespMin = monthlyAvgFirstResp > 0 ? (monthlyAvgFirstResp / 60) : 0;
       const monthlyTotalCalifPct = monthlyTotalTickets > 0 ? ((monthlyTotalBad + monthlyTotalGood) / monthlyTotalTickets * 100) : 0;
       const monthlyAvgQuality = monthlyAvg.qualityCount > 0 ? (monthlyAvg.quality / monthlyAvg.qualityCount) : 0;
 
@@ -4718,7 +4872,6 @@ const App = {
         <td style="text-align: center; background: #f0fdf4;">${monthlyTotalGood > 0 ? monthlyTotalGood.toFixed(0) : '-'}</td>
         <td style="text-align: center; background: #f0fdf4;">${monthlyAvgFirstResp > 0 ? monthlyAvgFirstResp.toFixed(1) : '-'}</td>
         <td style="text-align: center; background: #f0fdf4;">${monthlyAvgResol > 0 ? monthlyAvgResol.toFixed(1) : '-'}</td>
-        <td style="text-align: center; background: #f0fdf4; color: #0ea5e9;">${monthlyAvgFirstRespMin > 0 ? monthlyAvgFirstRespMin.toFixed(1) : '-'}</td>
         <td style="text-align: center; background: #f0fdf4;">${monthlyTotalCalifPct > 0 ? monthlyTotalCalifPct.toFixed(1) + '%' : '-'}</td>
         <td style="text-align: center; background: #f0fdf4; color: #38CEA6;">${monthlyAvgQuality > 0 ? monthlyAvgQuality.toFixed(1) + '%' : '-'}</td>
         ${isEditor ? '<td style="background: #f0fdf4;"></td>' : ''}
@@ -7427,6 +7580,773 @@ const App = {
       'gestion-herramientas': 'Herramientas'
     };
     return names[category] || category;
+  },
+
+  // ===== INCIDENTS VIEW =====
+
+  loadIncidentsView() {
+    this.loadIncidentTypes();
+    this.loadTeamCheckboxes();
+    this.loadIncidentsList();
+    this.setupIncidentFormHandlers();
+    this.setupIncidentCompareHandlers();
+  },
+
+  setIncidentFormStatus(message, kind = 'info') {
+    const box = document.getElementById('incidentFormStatus');
+    if (!box) return;
+    box.style.display = 'block';
+
+    const styles = {
+      info: { bg: '#f0f9ff', border: 'rgba(56, 206, 166, 0.25)' },
+      success: { bg: '#f0fdf4', border: 'rgba(34, 197, 94, 0.25)' },
+      warning: { bg: '#fef3c7', border: 'rgba(245, 158, 11, 0.35)' },
+      error: { bg: '#fee2e2', border: 'rgba(239, 68, 68, 0.35)' }
+    };
+    const s = styles[kind] || styles.info;
+    box.style.background = s.bg;
+    box.style.border = `1px solid ${s.border}`;
+    box.innerHTML = message;
+  },
+
+  clearIncidentFormStatus() {
+    const box = document.getElementById('incidentFormStatus');
+    if (!box) return;
+    box.style.display = 'none';
+    box.innerHTML = '';
+  },
+
+  // Reusa la lógica de importación (TSV) pero para un solo día
+  parseDayMetricsPaste(raw) {
+    const parsed = this.parseStrictMetricsTsv(raw);
+    if (parsed.fatal) {
+      return { metricsByAgent: null, imported: 0, skipped: 0, errors: parsed.errors || ['Formato inválido.'] };
+    }
+
+    const metricsByAgent = {};
+    let imported = 0;
+    let skipped = parsed.skipped || 0;
+    const errors = Array.isArray(parsed.errors) ? [...parsed.errors] : [];
+
+    const teams = DataManager.getAllTeams();
+    const agentExistsAnywhere = (name) => {
+      for (const teamId in teams) {
+        const team = teams[teamId];
+        if (team && team.members && team.members.some(m => m.name === name)) return true;
+      }
+      return false;
+    };
+
+    for (const row of (parsed.rows || [])) {
+      if (!agentExistsAnywhere(row.agentName)) {
+        skipped++;
+        errors.push(`Fila ${row.rowNumber} (${row.agentName}): agente no encontrado en equipos.`);
+        continue;
+      }
+      metricsByAgent[row.agentName] = row.metrics;
+      imported++;
+    }
+
+    if (imported === 0) {
+      return { metricsByAgent: null, imported: 0, skipped, errors: errors.length ? errors : ['No se pudo interpretar ninguna fila válida.'] };
+    }
+
+    return { metricsByAgent, imported, skipped, errors };
+  },
+
+  loadIncidentTypes() {
+    const types = DataManager.getAllIncidentTypes();
+    const select = document.getElementById('incidentType');
+    select.innerHTML = '<option value="">Seleccionar tipo...</option>' +
+      types.map(type => `<option value="${type}">${type}</option>`).join('');
+  },
+
+  loadTeamCheckboxes() {
+    const teams = DataManager.TEAMS;
+    const container = document.getElementById('incidentTeamsCheckboxes');
+    container.innerHTML = teams.map(team => `
+      <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: white; border-radius: 0.5rem; cursor: pointer;">
+        <input type="checkbox" name="affectedTeam" value="${team.id}" style="cursor: pointer;">
+        <span style="font-weight: 600; color: ${team.color};">${team.name}</span>
+      </label>
+    `).join('');
+
+    // Also populate team select for incident comparison
+    const teamSelect = document.getElementById('incidentCompareTeam');
+    if (teamSelect) {
+      teamSelect.innerHTML = '<option value="">Todos los Equipos</option>' +
+        teams.map(team => `<option value="${team.id}">${team.name}</option>`).join('');
+    }
+  },
+
+  setupIncidentCompareHandlers() {
+    if (this._incidentCompareHandlersBound) return;
+    this._incidentCompareHandlersBound = true;
+
+    const monthSel = document.getElementById('incidentCompareMonth');
+    const teamSel = document.getElementById('incidentCompareTeam');
+    const runBtn = document.getElementById('incidentCompareRunBtn');
+
+    const refresh = () => {
+      const monthValue = monthSel ? monthSel.value : '';
+      const teamId = teamSel ? (teamSel.value || null) : null;
+      if (!monthValue) {
+        const weeksBox = document.getElementById('incidentCompareWeeks');
+        const incBox = document.getElementById('incidentCompareIncidents');
+        if (weeksBox) weeksBox.innerHTML = '<p class="empty">Seleccione un mes</p>';
+        if (incBox) incBox.innerHTML = '<p class="empty">Seleccione un mes</p>';
+        return;
+      }
+
+      const { monthIndex, yearOverride } = this.parseSelectedMonthValue(monthValue);
+      const year = yearOverride || this.getEffectiveYearForMonth(monthIndex);
+      this.renderIncidentCompareWeeks(year, monthIndex);
+      this.renderIncidentCompareIncidents(year, monthIndex, teamId);
+    };
+
+    if (monthSel) monthSel.addEventListener('change', refresh);
+    if (teamSel) teamSel.addEventListener('change', refresh);
+    if (runBtn) runBtn.addEventListener('click', () => this.runIncidentComparison());
+
+    // Initial state
+    refresh();
+  },
+
+  renderIncidentCompareWeeks(year, monthIndex) {
+    const container = document.getElementById('incidentCompareWeeks');
+    if (!container) return;
+    const weeks = DataManager.ensureWeekConfig(year, monthIndex);
+    if (!weeks || weeks.length === 0) {
+      container.innerHTML = '<p class="empty">No hay configuración de semanas para este mes</p>';
+      return;
+    }
+
+    container.innerHTML = weeks.map((w, idx) => {
+      const label = `Semana ${idx + 1}: ${w.startDate} al ${w.endDate}`;
+      return `
+        <label style="display:flex; align-items:center; gap:0.6rem; padding: 0.6rem 0.75rem; background:#ffffff; border: 1px solid #e5e7eb; border-radius: 0.75rem; cursor:pointer;">
+          <input type="checkbox" class="incident-compare-week" value="${idx}" checked>
+          <span style="font-weight:700; color: var(--text-primary);">${label}</span>
+        </label>
+      `;
+    }).join('');
+  },
+
+  renderIncidentCompareIncidents(year, monthIndex, teamId) {
+    const container = document.getElementById('incidentCompareIncidents');
+    if (!container) return;
+
+    const weeks = DataManager.ensureWeekConfig(year, monthIndex);
+    const incidents = DataManager.getIncidentsForMonth(year, monthIndex, teamId);
+      
+    if (!incidents || incidents.length === 0) {
+      container.innerHTML = '<p class="empty">No hay incidencias para este mes</p>';
+      return;
+    }
+
+    incidents.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    const optionsWeeks = weeks.map((w, idx) => `<option value="${idx}">Semana ${idx + 1}: ${w.startDate} al ${w.endDate}</option>`).join('');
+
+    container.innerHTML = incidents.map(inc => {
+      const hasDay = !!(inc.dayMetricsByAgent && Object.keys(inc.dayMetricsByAgent).length > 0);
+      const autoWeekIndex = this.findWeekIndexForDate(weeks, inc.date);
+      const defaultWeek = (autoWeekIndex !== null && autoWeekIndex !== undefined) ? autoWeekIndex : 0;
+      const defaultMode = hasDay ? 'day' : 'week';
+
+      return `
+        <div class="glass-mini" style="padding: 0.85rem; border: 1px solid #e5e7eb;">
+          <label style="display:flex; align-items:start; gap:0.65rem; cursor:pointer;">
+            <input type="checkbox" class="incident-compare-incident" value="${inc.id}" style="margin-top: 0.2rem;" checked>
+            <div style="flex:1;">
+              <div style="display:flex; gap:0.5rem; align-items: baseline; flex-wrap: wrap;">
+                <span style="font-weight: 800; color: var(--text-primary);">${inc.type}</span>
+                <span style="color: var(--text-muted); font-size: 0.85rem;">${inc.date}</span>
+                <span style="margin-left:auto; color: var(--text-muted); font-size: 0.8rem;">${hasDay ? 'con métricas del día' : 'sin métricas del día'}</span>
+              </div>
+
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; margin-top: 0.65rem;">
+                <div>
+                  <div class="label-small" style="margin-bottom: 0.35rem;"><i class="fas fa-sliders"></i> Modo</div>
+                  <select class="input-dark incident-compare-mode" data-incident-id="${inc.id}" style="width:100%;">
+                    ${hasDay ? `<option value="day" ${defaultMode === 'day' ? 'selected' : ''}>Comparar usando el día (métricas pegadas)</option>` : ''}
+                    <option value="week" ${defaultMode === 'week' ? 'selected' : ''}>Comparar usando toda la semana</option>
+                  </select>
+                </div>
+                <div>
+                  <div class="label-small" style="margin-bottom: 0.35rem;"><i class="fas fa-layer-group"></i> Semana a comparar</div>
+                  <select class="input-dark incident-compare-week" data-incident-id="${inc.id}" style="width:100%;">
+                    ${optionsWeeks}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </label>
+        </div>
+      `;
+    }).join('');
+
+    // Set defaults after render
+    container.querySelectorAll('select.incident-compare-week').forEach(sel => {
+      const incidentId = sel.getAttribute('data-incident-id');
+      const inc = incidents.find(i => i.id === incidentId);
+      const autoWeekIndex = this.findWeekIndexForDate(weeks, inc?.date);
+      sel.value = String((autoWeekIndex !== null && autoWeekIndex !== undefined) ? autoWeekIndex : 0);
+    });
+  },
+
+  runIncidentComparison() {
+    const resultsBox = document.getElementById('incidentCompareResults');
+    const monthSel = document.getElementById('incidentCompareMonth');
+    const teamSel = document.getElementById('incidentCompareTeam');
+
+    const monthValue = monthSel ? monthSel.value : '';
+    const teamId = teamSel ? (teamSel.value || null) : null;
+
+    if (!monthValue) {
+      if (resultsBox) {
+        resultsBox.innerHTML = '<div style="text-align:center; padding: 2rem; color: var(--text-muted);">Seleccione un mes.</div>';
+      }
+      return;
+    }
+
+    const { monthIndex, yearOverride } = this.parseSelectedMonthValue(monthValue);
+    const year = yearOverride || this.getEffectiveYearForMonth(monthIndex);
+
+    const weekIndices = Array.from(document.querySelectorAll('#incidentCompareWeeks input.incident-compare-week:checked'))
+      .map(el => parseInt(el.value, 10))
+      .filter(v => Number.isInteger(v) && v >= 0);
+
+    const selectedIncidentIds = Array.from(document.querySelectorAll('#incidentCompareIncidents input.incident-compare-incident:checked'))
+      .map(el => el.value)
+      .filter(Boolean);
+
+    if (selectedIncidentIds.length === 0) {
+      if (resultsBox) {
+        resultsBox.innerHTML = '<div style="text-align:center; padding: 2rem; color: var(--text-muted);">Seleccione al menos una incidencia.</div>';
+      }
+      return;
+    }
+
+    // Base semanal (semanas seleccionadas)
+    const baseWeekly = DataManager.calculateImpactForWeeksAndOmissions(year, monthIndex, teamId, weekIndices, []);
+
+    // Métricas ajustadas = métricas del día (incidencias seleccionadas)
+    const selectionsCombined = selectedIncidentIds.map(id => {
+      const modeSel = document.querySelector(`#incidentCompareIncidents select.incident-compare-mode[data-incident-id="${id}"]`);
+      const weekSel = document.querySelector(`#incidentCompareIncidents select.incident-compare-week[data-incident-id="${id}"]`);
+      const mode = modeSel ? modeSel.value : 'day';
+      const wk = weekSel ? parseInt(weekSel.value, 10) : null;
+      return { incidentId: id, mode: mode === 'week' ? 'week' : 'day', weekIndex: Number.isInteger(wk) ? wk : null };
+    });
+
+    const adjusted = DataManager.calculateDayMetricsForSelections(year, monthIndex, teamId, selectionsCombined);
+
+    const perIncidence = selectedIncidentIds.map(id => {
+      const weekSel = document.querySelector(`#incidentCompareIncidents select.incident-compare-week[data-incident-id="${id}"]`);
+      const wk = weekSel ? parseInt(weekSel.value, 10) : null;
+      const weekBase = DataManager.calculateImpactForWeeksAndOmissions(
+        year,
+        monthIndex,
+        teamId,
+        Number.isInteger(wk) ? [wk] : weekIndices,
+        []
+      );
+      const modeSel = document.querySelector(`#incidentCompareIncidents select.incident-compare-mode[data-incident-id="${id}"]`);
+      const mode = modeSel ? modeSel.value : 'day';
+      const dayOnly = DataManager.calculateDayMetricsForSelections(year, monthIndex, teamId, [{ incidentId: id, mode: mode === 'week' ? 'week' : 'day', weekIndex: Number.isInteger(wk) ? wk : null }]);
+      return { incidentId: id, weekBase, dayOnly };
+    });
+
+    this.renderIncidentCompareResults({ year, monthIndex, teamId, weekIndices, baseWeekly, adjusted, perIncidence });
+  },
+
+  renderIncidentCompareResults(payload) {
+    const container = document.getElementById('incidentCompareResults');
+    if (!container) return;
+    const { year, monthIndex, weekIndices, baseWeekly, adjusted, perIncidence } = payload;
+
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const incidentsById = {};
+    DataManager.getAllIncidents().forEach(inc => { incidentsById[inc.id] = inc; });
+
+    const fmtPct = (v) => (v === null || v === undefined) ? 'N/A' : (v + '%');
+    const fmtMin = (v) => (v === null || v === undefined) ? 'N/A' : (v.toFixed(1) + ' min');
+    const fmtNum = (v) => (v === null || v === undefined) ? 'N/A' : String(v);
+    const delta = (a, b) => (a === null || b === null || a === undefined || b === undefined) ? null : (b - a);
+
+    const baseO = baseWeekly.overallA;
+    const adjustedO = adjusted.overall;
+
+    const satDelta = delta(baseO.satisfactionPct, adjustedO.satisfactionPct);
+    const frDelta = delta(baseO.avgFirstRespMin, adjustedO.avgFirstRespMin);
+    const resolDelta = delta(baseO.avgResolutionMin, adjustedO.avgResolutionMin);
+    const tphDelta = delta(baseO.avgTicketsPerHour, adjustedO.avgTicketsPerHour);
+
+    const classifyImpact = (dSat, dFr, dRes) => {
+      const aSat = (dSat === null || dSat === undefined) ? 0 : Math.abs(dSat);
+      const aFr = (dFr === null || dFr === undefined) ? 0 : Math.abs(dFr);
+      const aRes = (dRes === null || dRes === undefined) ? 0 : Math.abs(dRes);
+      if (aSat >= 10 || aFr >= 5 || aRes >= 10) return { label: 'Alto', color: '#991b1b' };
+      if (aSat >= 5 || aFr >= 2 || aRes >= 5) return { label: 'Medio', color: '#92400e' };
+      return { label: 'Bajo', color: '#166534' };
+    };
+
+    const overallImpact = classifyImpact(satDelta, frDelta, resolDelta);
+
+    const rows = perIncidence.map(({ incidentId, weekBase, dayOnly }) => {
+      const inc = incidentsById[incidentId];
+      const wkO = weekBase.overallA;
+      const dayO = dayOnly.overall;
+      const dSat = delta(wkO.satisfactionPct, dayO.satisfactionPct);
+      const dFr = delta(wkO.avgFirstRespMin, dayO.avgFirstRespMin);
+      const dRes = delta(wkO.avgResolutionMin, dayO.avgResolutionMin);
+      const impact = classifyImpact(dSat, dFr, dRes);
+      return {
+        inc,
+        satDelta: dSat,
+        frDelta: dFr,
+        resolDelta: dRes,
+        tphDelta: delta(wkO.avgTicketsPerHour, dayO.avgTicketsPerHour),
+        ticketsDelta: delta(wkO.totalTickets, dayO.totalTickets),
+        impact
+      };
+    });
+
+    const weekChip = (weekIndices && weekIndices.length > 0)
+      ? weekIndices.map(w => `Semana ${w + 1}`).join(' • ')
+      : 'Todas las semanas';
+
+    const baseScenario = baseWeekly.scenarioA || {};
+    const adjustedScenario = adjusted.scenario || {};
+
+    const agentRows = Object.keys(baseScenario)
+      .map(name => {
+        const a = baseScenario[name] || {};
+        const b = adjustedScenario[name] || {};
+        const dSat = (a.satisfactionPct === null || b.satisfactionPct === null || a.satisfactionPct === undefined || b.satisfactionPct === undefined)
+          ? null
+          : (b.satisfactionPct - a.satisfactionPct);
+        const dFr = (a.avgFirstRespMin === null || b.avgFirstRespMin === null || a.avgFirstRespMin === undefined || b.avgFirstRespMin === undefined)
+          ? null
+          : (b.avgFirstRespMin - a.avgFirstRespMin);
+        const dRes = (a.avgResolutionMin === null || b.avgResolutionMin === null || a.avgResolutionMin === undefined || b.avgResolutionMin === undefined)
+          ? null
+          : (b.avgResolutionMin - a.avgResolutionMin);
+        const impact = classifyImpact(dSat, dFr, dRes);
+        return {
+          name,
+          satA: a.satisfactionPct,
+          satB: b.satisfactionPct,
+          dSat,
+          frA: a.avgFirstRespMin,
+          frB: b.avgFirstRespMin,
+          dFr,
+          resA: a.avgResolutionMin,
+          resB: b.avgResolutionMin,
+          dRes,
+          tphA: a.avgTicketsPerHour,
+          tphB: b.avgTicketsPerHour,
+          dTph: (a.avgTicketsPerHour === null || b.avgTicketsPerHour === null || a.avgTicketsPerHour === undefined || b.avgTicketsPerHour === undefined)
+            ? null
+            : (b.avgTicketsPerHour - a.avgTicketsPerHour),
+          tA: a.totalTickets || 0,
+          tB: b.totalTickets || 0,
+          impact
+        };
+      })
+      .sort((x, y) => x.name.localeCompare(y.name));
+
+    const fmtPp = (v) => (v === null || v === undefined) ? 'N/A' : (v > 0 ? '+' : '') + v.toFixed(1);
+    const fmtDelta = (v) => (v === null || v === undefined) ? 'N/A' : (v > 0 ? '+' : '') + v.toFixed(1);
+    const fmtDelta2 = (v) => (v === null || v === undefined) ? 'N/A' : (v > 0 ? '+' : '') + v.toFixed(2);
+
+    container.innerHTML = `
+      <div style="display:flex; justify-content: space-between; align-items: start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+        <div>
+          <div style="font-weight: 900; font-size: 1.1rem; color: var(--text-primary);">Resultados — ${monthNames[monthIndex]} ${year}</div>
+          <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;">${weekChip}</div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+        <div class="glass-mini" style="padding: 1rem; background: linear-gradient(135deg, #f3f4f6, #e5e7eb);">
+          <div style="font-size: 0.85rem; font-weight: 700; color: var(--text-muted);">Base de métricas semanales</div>
+          <div style="margin-top: 0.35rem; font-size: 1.5rem; font-weight: 900;">${fmtPct(baseO.satisfactionPct)}</div>
+          <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;">T. 1ra Resp: <strong>${fmtMin(baseO.avgFirstRespMin)}</strong></div>
+          <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;">T. Resol: <strong>${fmtMin(baseO.avgResolutionMin)}</strong></div>
+          <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;">Demanda (TPH): <strong>${baseO.avgTicketsPerHour !== null ? baseO.avgTicketsPerHour.toFixed(2) : 'N/A'}</strong></div>
+        </div>
+
+        <div class="glass-mini" style="padding: 1rem; background: linear-gradient(135deg, #dbeafe, #bfdbfe);">
+          <div style="font-size: 0.85rem; font-weight: 700; color: #1e40af;">Métricas ajustadas (cambios por incidencias seleccionadas)</div>
+          <div style="margin-top: 0.35rem; font-size: 1.5rem; font-weight: 900; color: #1e3a8a;">${fmtPct(adjustedO.satisfactionPct)}</div>
+          <div style="color: #1e40af; font-size: 0.85rem; margin-top: 0.25rem;">T. 1ra Resp: <strong>${fmtMin(adjustedO.avgFirstRespMin)}</strong></div>
+          <div style="color: #1e40af; font-size: 0.85rem; margin-top: 0.25rem;">T. Resol: <strong>${fmtMin(adjustedO.avgResolutionMin)}</strong></div>
+          <div style="color: #1e40af; font-size: 0.85rem; margin-top: 0.25rem;">Demanda (TPH): <strong>${adjustedO.avgTicketsPerHour !== null ? adjustedO.avgTicketsPerHour.toFixed(2) : 'N/A'}</strong></div>
+        </div>
+
+        <div class="glass-mini" style="padding: 1rem; background: linear-gradient(135deg, ${satDelta !== null && satDelta > 0 ? '#dcfce7, #bbf7d0' : '#fee2e2, #fecaca'});">
+          <div style="font-size: 0.85rem; font-weight: 700; color: ${satDelta !== null && satDelta > 0 ? '#15803d' : '#b91c1c'};">Diferencia (Ajustadas - Base semanal) <span style="margin-left:0.5rem; font-weight:900; color:${overallImpact.color};">Impacto: ${overallImpact.label}</span></div>
+          <div style="margin-top: 0.35rem; font-size: 1.1rem; font-weight: 900; color: ${satDelta !== null && satDelta > 0 ? '#166534' : '#991b1b'};">
+            Satisfacción: ${satDelta === null ? 'N/A' : (satDelta > 0 ? '+' : '') + satDelta.toFixed(1) + ' pp'}
+          </div>
+          <div style="margin-top: 0.25rem; font-size: 0.95rem; font-weight: 900; color: ${frDelta !== null && frDelta < 0 ? '#166534' : '#991b1b'};">
+            T. 1ra Resp: ${frDelta === null ? 'N/A' : (frDelta > 0 ? '+' : '') + frDelta.toFixed(1) + ' min'}
+          </div>
+          <div style="margin-top: 0.25rem; font-size: 0.95rem; font-weight: 900; color: ${resolDelta !== null && resolDelta < 0 ? '#166534' : '#991b1b'};">
+            T. Resol: ${resolDelta === null ? 'N/A' : (resolDelta > 0 ? '+' : '') + resolDelta.toFixed(1) + ' min'}
+          </div>
+          <div style="margin-top: 0.25rem; font-size: 0.85rem; color: var(--text-muted);">
+            Demanda (TPH): ${tphDelta === null ? 'N/A' : (tphDelta > 0 ? '+' : '') + tphDelta.toFixed(2)}
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-mini" style="padding: 1.25rem;">
+        <div style="display:flex; align-items:center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+          <div style="font-weight: 900; color: var(--text-primary);">Impacto por incidencia</div>
+          <div style="color: var(--text-muted); font-size: 0.85rem;">${rows.length} incidencias</div>
+        </div>
+
+        <div style="overflow-x:auto;">
+          <table style="width:100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background:#f9fafb; border-bottom: 2px solid #e5e7eb;">
+                <th style="padding: 0.75rem; text-align:left; font-size:0.85rem;">Incidencia</th>
+                <th style="padding: 0.75rem; text-align:center; font-size:0.85rem;">Δ Satisfacción</th>
+                <th style="padding: 0.75rem; text-align:center; font-size:0.85rem;">Δ 1ra Resp (min)</th>
+                <th style="padding: 0.75rem; text-align:center; font-size:0.85rem;">Δ Resol (min)</th>
+                <th style="padding: 0.75rem; text-align:center; font-size:0.85rem;">Δ Demanda (TPH)</th>
+                <th style="padding: 0.75rem; text-align:center; font-size:0.85rem;">Δ Tickets</th>
+                <th style="padding: 0.75rem; text-align:center; font-size:0.85rem;">Impacto</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => {
+                const s = r.satDelta;
+                const fr = r.frDelta;
+                const re = r.resolDelta;
+                const tp = r.tphDelta;
+                const tk = r.ticketsDelta;
+                const inc = r.inc;
+                return `
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 0.75rem;">
+                      <div style="font-weight: 800; color: var(--text-primary);">${inc?.type || 'Incidencia'}</div>
+                      <div style="color: var(--text-muted); font-size: 0.85rem;">${inc?.date || ''}</div>
+                    </td>
+                    <td style="padding: 0.75rem; text-align:center; font-weight: 900; color: ${s !== null && s > 0 ? '#166534' : s !== null && s < 0 ? '#991b1b' : '#6b7280'};">${s === null ? 'N/A' : (s > 0 ? '+' : '') + s.toFixed(1) + ' pp'}</td>
+                    <td style="padding: 0.75rem; text-align:center; color: ${fr !== null && fr < 0 ? '#166534' : '#991b1b'}; font-weight: 800;">${fr === null ? 'N/A' : (fr > 0 ? '+' : '') + fr.toFixed(1)}</td>
+                    <td style="padding: 0.75rem; text-align:center; color: ${re !== null && re < 0 ? '#166534' : '#991b1b'}; font-weight: 800;">${re === null ? 'N/A' : (re > 0 ? '+' : '') + re.toFixed(1)}</td>
+                    <td style="padding: 0.75rem; text-align:center; font-weight: 800;">${tp === null ? 'N/A' : (tp > 0 ? '+' : '') + tp.toFixed(2)}</td>
+                    <td style="padding: 0.75rem; text-align:center; font-weight: 800;">${tk === null ? 'N/A' : (tk > 0 ? '+' : '') + tk.toFixed(0)}</td>
+                    <td style="padding: 0.75rem; text-align:center; font-weight: 900; color: ${r.impact?.color || '#6b7280'};">${r.impact?.label || '—'}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <details class="glass-mini" style="padding: 1rem; margin-top: 1rem;">
+        <summary style="cursor:pointer; font-weight: 900; color: var(--text-primary);">
+          Ver detalle por agente (opcional)
+        </summary>
+        <div style="margin-top: 0.75rem; overflow-x:auto;">
+          <table style="width:100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background:#f9fafb; border-bottom: 2px solid #e5e7eb;">
+                <th style="padding: 0.65rem; text-align:left; font-size:0.85rem;">Agente</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">Satisfacción Base</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">Satisfacción Ajustada</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">Δ Satisfacción</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">1ra Resp Base (min)</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">1ra Resp Ajust (min)</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">Δ 1ra Resp</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">Resol Base (min)</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">Resol Ajust (min)</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">Δ Resol</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">TPH Base</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">TPH Ajust</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">Δ TPH</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">Tickets Base</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">Tickets Ajust</th>
+                <th style="padding: 0.65rem; text-align:center; font-size:0.85rem;">Impacto</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${agentRows.map(r => {
+                const dSat = r.dSat;
+                const dFr = r.dFr;
+                const dRes = r.dRes;
+                const dTph = r.dTph;
+                return `
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 0.65rem; font-weight: 800;">${r.name}</td>
+                    <td style="padding: 0.65rem; text-align:center;">${r.satA === null || r.satA === undefined ? 'N/A' : r.satA + '%'}</td>
+                    <td style="padding: 0.65rem; text-align:center;">${r.satB === null || r.satB === undefined ? 'N/A' : r.satB + '%'}</td>
+                    <td style="padding: 0.65rem; text-align:center; font-weight: 900; color: ${dSat !== null && dSat > 0 ? '#166534' : dSat !== null && dSat < 0 ? '#991b1b' : '#6b7280'};">${fmtPp(dSat)}</td>
+                    <td style="padding: 0.65rem; text-align:center;">${r.frA === null || r.frA === undefined ? 'N/A' : r.frA.toFixed(1)}</td>
+                    <td style="padding: 0.65rem; text-align:center;">${r.frB === null || r.frB === undefined ? 'N/A' : r.frB.toFixed(1)}</td>
+                    <td style="padding: 0.65rem; text-align:center; font-weight: 800;">${fmtDelta(dFr)}</td>
+                    <td style="padding: 0.65rem; text-align:center;">${r.resA === null || r.resA === undefined ? 'N/A' : r.resA.toFixed(1)}</td>
+                    <td style="padding: 0.65rem; text-align:center;">${r.resB === null || r.resB === undefined ? 'N/A' : r.resB.toFixed(1)}</td>
+                    <td style="padding: 0.65rem; text-align:center; font-weight: 800;">${fmtDelta(dRes)}</td>
+                    <td style="padding: 0.65rem; text-align:center;">${r.tphA === null || r.tphA === undefined ? 'N/A' : r.tphA.toFixed(2)}</td>
+                    <td style="padding: 0.65rem; text-align:center;">${r.tphB === null || r.tphB === undefined ? 'N/A' : r.tphB.toFixed(2)}</td>
+                    <td style="padding: 0.65rem; text-align:center; font-weight: 800;">${fmtDelta2(dTph)}</td>
+                    <td style="padding: 0.65rem; text-align:center;">${r.tA}</td>
+                    <td style="padding: 0.65rem; text-align:center;">${r.tB}</td>
+                    <td style="padding: 0.65rem; text-align:center; font-weight: 900; color: ${r.impact?.color || '#6b7280'};">${r.impact?.label || '—'}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    `;
+  },
+
+  setupIncidentFormHandlers() {
+    if (this._incidentHandlersBound) return;
+    this._incidentHandlersBound = true;
+
+    // Add new incident type
+    const addTypeBtn = document.getElementById('addIncidentTypeBtn');
+    if (addTypeBtn) {
+      addTypeBtn.addEventListener('click', () => {
+        const input = document.getElementById('incidentNewType');
+        const newType = String(input?.value || '').trim();
+        if (!newType) {
+          this.setIncidentFormStatus('Indique el nombre del tipo a agregar.', 'warning');
+          return;
+        }
+        const added = DataManager.addIncidentType(newType);
+        if (added) {
+          this.loadIncidentTypes();
+          if (input) input.value = '';
+          this.setIncidentFormStatus(`Tipo agregado: <strong>${newType}</strong>.`, 'success');
+        } else {
+          this.setIncidentFormStatus('Este tipo de incidencia ya existe.', 'warning');
+        }
+      });
+    }
+
+    // Handle form submission
+    const incidentForm = document.getElementById('incidentForm');
+    if (!incidentForm) return;
+    incidentForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      this.clearIncidentFormStatus();
+      
+      const date = document.getElementById('incidentDate').value;
+      const type = document.getElementById('incidentType').value;
+      const description = document.getElementById('incidentDescription').value;
+      const dayPaste = document.getElementById('incidentDayMetricsPaste')?.value || '';
+      
+      const affectedTeams = Array.from(
+        document.querySelectorAll('input[name="affectedTeam"]:checked')
+      ).map(cb => cb.value);
+
+      if (!date || !type) {
+        this.setIncidentFormStatus('Complete los campos obligatorios: fecha y tipo.', 'warning');
+        return;
+      }
+
+      if (affectedTeams.length === 0) {
+        this.setIncidentFormStatus('Seleccione al menos un equipo afectado.', 'warning');
+        return;
+      }
+
+      // Parse optional day metrics
+      let dayMetricsByAgent = null;
+      let dayParseSummary = null;
+      if (String(dayPaste).trim()) {
+        const parsedDay = this.parseDayMetricsPaste(dayPaste);
+        if (!parsedDay.metricsByAgent) {
+          this.setIncidentFormStatus(`No se pudieron cargar las métricas del día. ${parsedDay.errors?.[0] || ''}`, 'warning');
+          return;
+        }
+        dayMetricsByAgent = parsedDay.metricsByAgent;
+        dayParseSummary = parsedDay;
+      }
+
+      const user = DataManager.getCurrentUser();
+      const incident = DataManager.saveIncident({
+        date,
+        type,
+        affectedTeams,
+        description,
+        dayMetricsByAgent,
+        omitFromScenario: true,
+        createdBy: user ? user.email : null
+      });
+
+      if (dayParseSummary && (dayParseSummary.skipped > 0 || (dayParseSummary.errors && dayParseSummary.errors.length > 0))) {
+        const detail = (dayParseSummary.errors && dayParseSummary.errors.length)
+          ? `<div style="margin-top:0.35rem; font-size:0.85rem; color: var(--text-muted);">${dayParseSummary.errors.slice(0, 6).join('<br>')}${dayParseSummary.errors.length > 6 ? `<br>...y ${dayParseSummary.errors.length - 6} más` : ''}</div>`
+          : '';
+        this.setIncidentFormStatus(
+          `Incidencia registrada. Métricas del día: <strong>${dayParseSummary.imported}</strong> importadas, <strong>${dayParseSummary.skipped}</strong> omitidas.${detail}`,
+          'warning'
+        );
+      } else {
+        this.setIncidentFormStatus('Incidencia registrada exitosamente.', 'success');
+      }
+      
+      // Reset form
+      document.getElementById('incidentForm').reset();
+      document.querySelectorAll('input[name="affectedTeam"]').forEach(cb => cb.checked = false);
+      const pasteEl = document.getElementById('incidentDayMetricsPaste');
+      if (pasteEl) pasteEl.value = '';
+      
+      // Reload list
+      this.loadIncidentsList();
+    });
+  },
+
+  loadIncidentsList() {
+    const incidents = DataManager.getAllIncidents();
+    const container = document.getElementById('incidentsList');
+    
+    if (incidents.length === 0) {
+      container.innerHTML = '<p class="empty">No hay incidencias registradas</p>';
+      return;
+    }
+
+    // Sort by date descending
+    incidents.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    const teams = DataManager.TEAMS;
+    const getTeamName = (teamId) => {
+      const team = teams.find(t => t.id === teamId);
+      return team ? team.name : teamId;
+    };
+
+    container.innerHTML = `
+      <div style="display: grid; gap: 1rem;">
+        ${incidents.map(incident => {
+          const incidentDate = new Date(incident.date);
+          const formattedDate = incidentDate.toLocaleDateString('es-VE', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          });
+
+          return `
+            <div class="glass-mini" style="padding: 1rem;">
+              <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
+                <div style="flex: 1;">
+                  <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                    <span style="background: #fee2e2; color: #dc2626; padding: 0.25rem 0.75rem; border-radius: 0.375rem; font-size: 0.85rem; font-weight: 600;">
+                      ${incident.type}
+                    </span>
+                    <span style="color: var(--text-muted); font-size: 0.85rem;">
+                      <i class="fas fa-calendar"></i> ${formattedDate}
+                    </span>
+                  </div>
+                  <div style="margin-top: 0.5rem;">
+                    <strong style="font-size: 0.85rem; color: var(--text-primary);">Equipos Afectados:</strong>
+                    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem;">
+                      ${incident.affectedTeams.map(teamId => {
+                        const team = teams.find(t => t.id === teamId);
+                        return `
+                          <span style="background: ${team ? team.color + '22' : '#f3f4f6'}; color: ${team ? team.color : '#6b7280'}; padding: 0.25rem 0.75rem; border-radius: 0.375rem; font-size: 0.8rem; font-weight: 600;">
+                            ${getTeamName(teamId)}
+                          </span>
+                        `;
+                      }).join('')}
+                    </div>
+                  </div>
+                  ${incident.description ? `
+                    <div style="margin-top: 0.5rem; padding: 0.5rem; background: #f9fafb; border-radius: 0.375rem; font-size: 0.85rem; color: var(--text-muted);">
+                      ${incident.description}
+                    </div>
+                  ` : ''}
+                </div>
+                <div style="display:flex; gap:0.5rem; align-items:center;">
+                  <button onclick="App.compareIncidentToWeek('${incident.id}')" class="btn-accent" style="background: linear-gradient(135deg, #272883, #1e1f6a); color: white; border: none; padding: 0.5rem 0.75rem;">
+                    <i class="fas fa-balance-scale"></i> Comparar
+                  </button>
+                  <button onclick="App.deleteIncident('${incident.id}')" class="btn-accent" style="background: #fee2e2; color: #dc2626; border: none; padding: 0.5rem;">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  },
+
+  findWeekIndexForDate(weeks, dateStr) {
+    const d = new Date(dateStr);
+    if (!Array.isArray(weeks) || isNaN(d.getTime())) return null;
+    for (let i = 0; i < weeks.length; i++) {
+      const w = weeks[i];
+      const start = new Date(w.startDate);
+      const end = new Date(w.endDate);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) continue;
+      // Inclusive
+      if (d >= start && d <= end) return i;
+    }
+    return null;
+  },
+
+  deleteIncident(incidentId) {
+    if (!confirm('¿Está seguro de eliminar esta incidencia?')) return;
+    
+    DataManager.deleteIncident(incidentId);
+    this.loadIncidentsList();
+    this.setIncidentFormStatus('Incidencia eliminada.', 'info');
+  },
+
+  compareIncidentToWeek(incidentId) {
+    // Shortcut: preselecciona el comparador con esta incidencia y ejecuta comparación
+    const incidents = DataManager.getAllIncidents();
+    const inc = incidents.find(i => i.id === incidentId);
+    if (!inc) {
+      this.setIncidentFormStatus('No se encontró la incidencia seleccionada.', 'warning');
+      return;
+    }
+
+    const d = new Date(inc.date);
+    if (isNaN(d.getTime())) {
+      this.setIncidentFormStatus('La incidencia tiene una fecha inválida.', 'warning');
+      return;
+    }
+
+    const year = d.getFullYear();
+    const monthIndex = d.getMonth();
+    const monthSel = document.getElementById('incidentCompareMonth');
+    const teamSel = document.getElementById('incidentCompareTeam');
+
+    if (monthSel) {
+      monthSel.value = (year === 2025 && monthIndex === 11) ? '11|2025' : String(monthIndex);
+      monthSel.dispatchEvent(new Event('change'));
+    }
+
+    if (teamSel) {
+      if (Array.isArray(inc.affectedTeams) && inc.affectedTeams.length === 1) {
+        teamSel.value = inc.affectedTeams[0];
+      } else {
+        teamSel.value = '';
+      }
+      teamSel.dispatchEvent(new Event('change'));
+    }
+
+    // Ensure checkbox stays checked and set week/mode defaults
+    setTimeout(() => {
+      const chk = document.querySelector(`#incidentCompareIncidents input.incident-compare-incident[value="${inc.id}"]`);
+      if (chk) chk.checked = true;
+      const modeSel = document.querySelector(`#incidentCompareIncidents select.incident-compare-mode[data-incident-id="${inc.id}"]`);
+      if (modeSel) modeSel.value = (inc.dayMetricsByAgent && Object.keys(inc.dayMetricsByAgent).length > 0) ? 'day' : 'week';
+      this.runIncidentComparison();
+    }, 0);
   }
 };
 

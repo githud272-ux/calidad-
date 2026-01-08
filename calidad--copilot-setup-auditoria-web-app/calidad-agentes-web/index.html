@@ -124,6 +124,10 @@
             <i class="fas fa-users"></i>
             <span>Gestión de Equipos</span>
           </button>
+          <button class="nav-btn only-editor" data-view="incidents">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>Control de Incidencias</span>
+          </button>
         </nav>
 
         <div class="nav-footer">
@@ -322,6 +326,170 @@
 
             <div id="teamsContainer" style="display: grid; gap: 1.5rem;">
               <!-- Teams will be loaded here dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Incidents Control Panel View -->
+        <div id="incidentsView" class="view-section hidden">
+          <div class="glass" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+            <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0 0 0.5rem 0;">
+              <i class="fas fa-exclamation-triangle"></i> Control de Incidencias de Equipo
+            </h2>
+            <p style="color: var(--text-muted); margin: 0 0 1.5rem 0;">
+              Registra eventos externos que generan picos de volumen y calificaciones negativas masivas (caídas de plataforma, intermitencias bancarias, etc.)
+            </p>
+
+            <!-- Incident Registration Form -->
+            <div class="glass-mini" style="padding: 1.25rem; margin-bottom: 1.5rem;">
+              <h3 style="font-size: 1.1rem; font-weight: 700; margin: 0 0 1rem 0;">
+                <i class="fas fa-plus-circle"></i> Registrar Nueva Incidencia
+              </h3>
+
+              <div id="incidentFormStatus" style="display: none; margin: 0 0 1rem 0; padding: 0.75rem 1rem; border-radius: 0.75rem; background: #f0f9ff; border: 1px solid rgba(56, 206, 166, 0.25); color: var(--text-primary);"></div>
+
+              <form id="incidentForm" style="display: grid; gap: 1rem;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
+                  <div>
+                    <label class="label-small" for="incidentDate">
+                      <i class="fas fa-calendar"></i> Fecha de la Incidencia *
+                    </label>
+                    <input type="date" id="incidentDate" class="input-dark" required>
+                  </div>
+                  <div>
+                    <label class="label-small" for="incidentType">
+                      <i class="fas fa-tag"></i> Tipo de Incidencia *
+                    </label>
+                    <select id="incidentType" class="input-dark" style="width: 100%;" required>
+                      <option value="">Seleccionar tipo...</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr auto; gap: 0.75rem; align-items: end;">
+                  <div>
+                    <label class="label-small" for="incidentNewType">
+                      <i class="fas fa-plus"></i> Agregar tipo (opcional)
+                    </label>
+                    <input type="text" id="incidentNewType" class="input-dark" placeholder="Ej: Caída de plataforma, Intermitencia bancaria...">
+                  </div>
+                  <button type="button" id="addIncidentTypeBtn" class="btn-accent" style="background: #38CEA6; color: white; border: none; white-space: nowrap;">
+                    <i class="fas fa-plus"></i> Agregar tipo
+                  </button>
+                </div>
+
+                <div>
+                  <label class="label-small">
+                    <i class="fas fa-users"></i> Equipos Afectados * (Seleccione uno o varios)
+                  </label>
+                  <div id="incidentTeamsCheckboxes" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; margin-top: 0.5rem;">
+                    <!-- Team checkboxes will be loaded here -->
+                  </div>
+                </div>
+                <div>
+                  <label class="label-small" for="incidentDescription">
+                    <i class="fas fa-align-left"></i> Descripción / Observación
+                  </label>
+                  <textarea id="incidentDescription" class="input-dark" rows="3" placeholder="Detalle breve de lo ocurrido..."></textarea>
+                </div>
+
+                <div style="background: #f9fafb; border-radius: 0.75rem; padding: 1rem; border: 1px dashed #e5e7eb;">
+                  <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.35rem;">
+                    <i class="fas fa-file-import" style="color: #272883;"></i>
+                    <span>Métricas del día (opcional)</span>
+                  </div>
+                  <p style="margin: 0 0 0.75rem 0; color: var(--text-muted); font-size: 0.85rem; line-height: 1.5;">
+                    Pegue aquí el mismo formato de importación (tabulado, con encabezado). Columnas esperadas: <strong>Nombre del agente asignado</strong>, <strong>Tickets resueltos</strong>, <strong>Tickets resueltos - Promedio diario</strong>, <strong>Tickets con satisfacción mala</strong>, <strong>Tickets con satisfacción buena</strong>, <strong>Tiempo de primera respuesta (s)</strong>, <strong>Tiempo de resolución completa (min)</strong>, <strong>Tiempo de primera respuesta (min)</strong>.
+                    Esto permite comparar el impacto de la incidencia sin excluir semanas completas.
+                  </p>
+                  <textarea id="incidentDayMetricsPaste" class="input-dark" rows="6" placeholder="Nombre del agente asignado\tTickets resueltos\tTickets resueltos - Promedio diario\tTickets con satisfacción mala\tTickets con satisfacción buena\tTiempo de primera respuesta (s)\tTiempo de resolución completa (min)\tTiempo de primera respuesta (min)\n..."></textarea>
+                </div>
+
+                <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+                  <button type="submit" class="btn-accent" style="background: linear-gradient(135deg, #38CEA6, #0b8f6a); color: white; border: none;">
+                    <i class="fas fa-save"></i> Guardar Incidencia
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <!-- Incidents List -->
+            <div class="glass-mini" style="padding: 1.25rem;">
+              <h3 style="font-size: 1.1rem; font-weight: 700; margin: 0 0 1rem 0;">
+                <i class="fas fa-list"></i> Incidencias Registradas
+              </h3>
+              <div id="incidentsList">
+                <p class="empty">No hay incidencias registradas</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Incident Comparison -->
+          <div class="glass" style="padding: 1.5rem;">
+            <div style="display:flex; justify-content: space-between; align-items: start; gap: 1rem; flex-wrap: wrap;">
+              <div>
+                <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0 0 0.35rem 0;">
+                  <i class="fas fa-chart-line"></i> Comparador de Incidencias
+                </h2>
+                <p style="color: var(--text-muted); margin: 0;">
+                  Seleccione semanas e incidencias para comparar su impacto (incluye satisfacción).
+                </p>
+              </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns: 420px 1fr; gap: 1.25rem; margin-top: 1.25rem; align-items: start;">
+              <div class="glass-mini" style="padding: 1.25rem;">
+                <div style="display: grid; gap: 0.9rem;">
+                  <div>
+                    <label class="label-small" for="incidentCompareMonth">
+                      <i class="fas fa-calendar-alt"></i> Mes
+                    </label>
+                    <select id="incidentCompareMonth" class="input-dark" style="width: 100%;">
+                      <option value="">Seleccionar mes...</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label class="label-small" for="incidentCompareTeam">
+                      <i class="fas fa-users"></i> Equipo (opcional)
+                    </label>
+                    <select id="incidentCompareTeam" class="input-dark" style="width: 100%;">
+                      <option value="">Todos los Equipos</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label class="label-small">
+                      <i class="fas fa-layer-group"></i> Semanas a comparar
+                    </label>
+                    <div id="incidentCompareWeeks" style="display: grid; gap: 0.5rem;">
+                      <p class="empty">Seleccione un mes</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="label-small">
+                      <i class="fas fa-exclamation-triangle"></i> Incidencias
+                    </label>
+                    <div id="incidentCompareIncidents" style="display: grid; gap: 0.6rem; max-height: 420px; overflow: auto; padding-right: 0.25rem;">
+                      <p class="empty">Seleccione un mes</p>
+                    </div>
+                  </div>
+
+                  <div style="display:flex; justify-content: flex-end; gap: 0.75rem;">
+                    <button id="incidentCompareRunBtn" class="btn-accent" style="background: linear-gradient(135deg, #272883, #1e1f6a); color: white; border: none;">
+                      <i class="fas fa-chart-bar"></i> Comparar
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="incidentCompareResults">
+                <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                  <i class="fas fa-chart-bar" style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;"></i>
+                  <p>Seleccione semanas e incidencias para ver la comparación</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
